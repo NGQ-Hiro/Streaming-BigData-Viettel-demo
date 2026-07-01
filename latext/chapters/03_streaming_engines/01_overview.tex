@@ -1,0 +1,50 @@
+\section{Overview of Stream Processing}
+
+\subsection{Batch vs.\ Stream Processing}
+
+Data processing systems can be broadly categorised by when computation occurs
+relative to data arrival:
+
+\begin{itemize}
+  \item \textbf{Batch processing} — data is collected over a time window, stored, and then
+        processed in a single large job. Systems like Apache Hadoop MapReduce and scheduled
+        SQL pipelines fall into this category. Batch processing is well-suited to historical
+        reports and large-scale transformations where latency is measured in hours or days.
+  \item \textbf{Stream processing} — computation is performed \emph{continuously} as each record
+        arrives. Results are produced with latency measured in milliseconds to seconds.
+        This model is essential for real-time dashboards, fraud detection, IoT monitoring,
+        and any use case where acting on stale data is unacceptable.
+\end{itemize}
+
+\subsection{Key Challenges in Stream Processing}
+
+Building a correct, efficient stream-processing system is significantly harder than
+batch processing, due to several inherent challenges:
+
+\begin{itemize}
+  \item \textbf{Unbounded data} — the stream has no defined end; the system must process records
+        indefinitely without accumulating unbounded state.
+  \item \textbf{Out-of-order events} — network delays, retries, and clock skew mean that events
+        frequently arrive out of their logical order. A system must decide when it is safe to
+        emit a windowed result even if some late events may still be in transit.
+  \item \textbf{Stateful computation} — aggregations, joins, and deduplication require maintaining
+        keyed state across events. This state must be fault-tolerant and scalable.
+  \item \textbf{Fault tolerance} — any node in the cluster can fail at any time.
+        The system must recover to a consistent state without losing records or producing duplicates.
+  \item \textbf{Delivery semantics} — depending on the use case, the system must guarantee
+        \emph{at-most-once} (may lose), \emph{at-least-once} (may duplicate), or
+        \emph{exactly-once} (no loss, no duplicate) processing.
+\end{itemize}
+
+\subsection{Two Leading Engines}
+
+This chapter examines the two most widely adopted open-source stream-processing frameworks:
+
+\begin{description}
+  \item[Apache Spark Structured Streaming] — extends Spark's batch DataFrame API to streaming data
+        via a \emph{micro-batch} execution model, with an experimental \emph{continuous processing}
+        (real-time) mode for lower latency.
+  \item[Apache Flink] — a purpose-built, true-streaming engine that processes events one at a time
+        using a \emph{dataflow graph} model, with first-class support for event time, watermarks,
+        and exactly-once semantics via the Chandy-Lamport checkpointing algorithm.
+\end{description}

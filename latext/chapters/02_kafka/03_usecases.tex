@@ -1,0 +1,22 @@
+\section{Use Cases}
+
+% TODO: List the canonical Kafka use cases with a brief explanation of each.
+
+\begin{table}[H]
+  \centering
+  \caption{Common Apache Kafka use cases.}
+  \label{tab:kafka-usecases}
+  \begin{tabularx}{\textwidth}{lX}
+    \toprule
+    \textbf{Use Case}              & \textbf{Description} \\
+    \midrule
+    Real-time event streaming      & Collect click streams, IoT telemetry, or application logs and process them with Flink or Spark. \\
+    Microservice messaging         & Decouple services with an async pub/sub channel instead of synchronous REST or gRPC calls. \\
+    Change Data Capture (CDC)      & Stream database change events (via Debezium) to keep downstream systems in sync. \\
+    Log aggregation                & Centralise logs from hundreds of servers into a single, queryable stream. \\
+    Metrics \& monitoring          & Route time-series metrics to alerting pipelines and observability stores. \\
+    Event sourcing                 & Use a compacted topic as the system of record; reconstruct application state by replaying events. \\
+    Stream ETL                     & Read raw events, transform and enrich them in flight (Flink/Spark), and land clean data in a warehouse. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}

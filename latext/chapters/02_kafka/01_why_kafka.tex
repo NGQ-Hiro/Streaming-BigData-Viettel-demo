@@ -1,0 +1,41 @@
+\section{Why Do We Need Kafka}
+
+\subsection{The Problem with Direct Communication}
+
+In a naive distributed system, services communicate directly: a producer service calls a
+consumer service's API whenever it has new data to share.
+This point-to-point architecture quickly breaks down as the system grows:
+
+\begin{itemize}
+  \item \textbf{Tight coupling} — every producer must know the address, protocol, and schema of every consumer.
+        Adding a new consumer requires modifying every upstream producer; removing one breaks others.
+  \item \textbf{No buffering} — if a consumer is temporarily offline or slow, the producer either blocks
+        (degrading its own performance) or drops messages (causing data loss).
+  \item \textbf{No replay} — once a message is delivered, it is consumed and gone.
+        If a downstream system fails mid-processing, there is no way to re-read the original event.
+  \item \textbf{Synchronous bottleneck} — a synchronous request-response path cannot absorb sudden
+        traffic spikes; a surge in producer activity cascades directly to consumers.
+  \item \textbf{Fan-out complexity} — delivering the same event to multiple independent consumers
+        (e.g.\ an analytics pipeline \emph{and} a fraud detector) requires the producer to make
+        $N$ separate calls, one per consumer.
+\end{itemize}
+
+\subsection{How Kafka Solves These Problems}
+
+Apache Kafka inserts a durable, distributed \textbf{commit log} between producers and consumers,
+decoupling them in time, space, and implementation:
+
+\begin{itemize}
+  \item \textbf{Decoupling} — producers write to a named topic; consumers subscribe to that topic.
+        Neither side knows about the other; new consumers can be added without touching producers.
+  \item \textbf{Durable buffering} — records are persisted to disk and replicated across brokers.
+        A consumer that goes offline for hours can catch up by reading from its last committed offset.
+  \item \textbf{Replay} — Kafka retains records for a configurable window (hours, days, or forever with
+        log compaction). Any consumer can re-read past events for reprocessing, debugging, or bootstrapping a new service.
+  \item \textbf{Horizontal scalability} — topics are partitioned; each partition is an independent,
+        ordered log. Adding partitions linearly scales both write throughput and read parallelism.
+  \item \textbf{Fan-out for free} — multiple consumer groups can independently read the same topic
+        at their own pace, each maintaining its own offset cursor, with zero overhead for the producer.
+  \item \textbf{High durability} — a configurable replication factor ensures that data survives the
+        failure of one or more brokers.
+\end{itemize}

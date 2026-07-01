@@ -1,0 +1,33 @@
+\section{Background and Motivation}
+
+The digital economy has fundamentally transformed how data is generated and consumed.
+Modern applications — social media platforms, e-commerce systems, IoT devices, and
+music streaming services — produce enormous volumes of events continuously and at high velocity.
+According to industry estimates, the global volume of data generated daily exceeds 2.5 quintillion
+bytes, and a significant portion of this data has value only if it is acted upon immediately.
+
+Traditional \textbf{batch processing} pipelines, built on tools such as Apache Hadoop MapReduce
+or scheduled SQL jobs, collect data over a fixed window (hourly, daily) and process it in bulk.
+While effective for historical reporting, batch pipelines suffer from inherent latency:
+insights derived from yesterday's data cannot drive today's real-time decisions.
+A music streaming platform, for instance, cannot recommend songs based on what a user listened
+to an hour ago — the recommendation must be computed within seconds of the current play event.
+
+\textbf{Stream processing} addresses this gap by treating data as a continuous, unbounded flow
+of events and computing results incrementally as each event arrives.
+This paradigm enables:
+
+\begin{itemize}
+  \item \textbf{Real-time personalisation} — recommendations, rankings, and alerts computed within milliseconds of an event.
+  \item \textbf{Operational intelligence} — dashboards and anomaly detection systems that reflect the current state of the system, not a stale snapshot.
+  \item \textbf{Event-driven architectures} — microservices that react to changes in a shared event log rather than polling a database.
+  \item \textbf{Fault-tolerant pipelines} — systems that can recover from failures without reprocessing hours of backlogged data.
+\end{itemize}
+
+Two foundational technologies underpin modern streaming platforms:
+a \textbf{distributed message queue} (Apache Kafka) that reliably captures and transports
+events at scale, and a \textbf{stream-processing engine} (Apache Flink or Apache Spark)
+that transforms those events in real time.
+This report examines both layers in depth, and demonstrates their use in a concrete
+end-to-end project — \textit{Streamify} — that processes simulated music streaming events
+from ingestion through to interactive business intelligence dashboards.

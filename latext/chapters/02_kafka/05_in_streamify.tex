@@ -1,0 +1,18 @@
+\section{Kafka in the Streamify Pipeline}
+
+% TODO: Describe how Eventsim publishes to three topics and how Flink consumes
+%       them; mention the Confluent broker and Schema Registry used in the project.
+
+In Streamify, a Confluent Kafka broker (running in Docker) receives events from
+Eventsim across three topics:
+
+\begin{itemize}
+  \item \texttt{listen\_events} — song-play events (artist, song, duration, timestamp, user metadata).
+  \item \texttt{page\_view\_events} — navigation and page-view events (page, method, status).
+  \item \texttt{auth\_events} — user authentication events (success/failure, session metadata).
+\end{itemize}
+
+The Confluent Control Center (port \texttt{9021}) and Schema Registry (port
+\texttt{8081}) are also deployed to monitor topic health and enforce JSON schemas.
+Flink connects to the broker at \texttt{broker:29092} and consumes all three
+topics in parallel using the \texttt{flink-connector-kafka} source.

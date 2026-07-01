@@ -1,0 +1,82 @@
+\section{Streaming Pipeline: Eventsim → Kafka → Flink → Snowflake}
+
+This section walks through the three active stages of the real-time pipeline:
+event generation, message transport, and stream processing.
+
+\subsection{Event Simulation with Eventsim}
+
+Eventsim is an open-source event generator that simulates the behaviour of users on a
+fictional music streaming website.
+It models realistic user sessions — login, browse, play tracks, skip songs, logout —
+and emits each interaction as a JSON event to a Kafka topic.
+
+\begin{itemize}
+  \item Song metadata is drawn from a \textbf{10,000-song subset} of the Million Songs Dataset,
+        providing realistic artist names, song titles, and durations.
+  \item User demographics (age, location, subscription tier) are synthetically generated
+        using US census data, giving the events geographic and behavioural diversity.
+  \item Three topics are produced simultaneously:
+    \begin{itemize}
+      \item \texttt{listen\_events} — artist, song, duration, timestamp, user ID, location, subscription level.
+      \item \texttt{page\_view\_events} — page name, HTTP method, status code, session ID, user context.
+      \item \texttt{auth\_events} — session ID, success/failure flag, subscription level, timestamp.
+    \end{itemize}
+  \item The Confluent Schema Registry (port \texttt{8081}) enforces JSON schemas on each topic,
+        preventing schema drift from corrupting downstream consumers.
+\end{itemize}
+
+\subsection{Flink Streaming Job}
+
+The PyFlink job (\texttt{flink\_streaming/jobs/stream\_events.py}) consumes all three topics in
+a single Flink execution graph using the Table API and Flink SQL.
+
+\subsubsection{Schema and Source Registration}
+
+Each topic's JSON payload is mapped to a set of Flink SQL column definitions in \texttt{schema.py}.
+The \texttt{create\_kafka\_source()} function registers a temporary Kafka source table via DDL:
+
+\begin{lstlisting}[language=SQL, caption={Generated Kafka source DDL for \texttt{listen\_events}.}]
+CREATE TEMPORARY TABLE src_listen_events (
+    `artist`        STRING,
+    `song`          STRING,
+    `duration`      DOUBLE,
+    `ts`            BIGINT,
+    `userId`        BIGINT,
+    `level`         STRING,
+    `city`          STRING,
+    `state`         STRING,
+    -- ...
+) WITH (
+    'connector'                    = 'kafka',
+    'topic'                        = 'listen_events',
+    'properties.bootstrap.servers' = 'broker:29092',
+    'properties.group.id'          = 'flink-streamify',
+    'scan.startup.mode'            = 'earliest-offset',
+    'format'                       = 'json',
+    'json.ignore-parse-errors'     = 'true'
+)
+\end{lstlisting}
+
+\subsubsection{Transformation and Sink}
+
+For each topic, the job enriches the raw stream and writes to a Snowflake JDBC sink:
+
+\begin{itemize}
+  \item \textbf{Timestamp conversion} — the raw \texttt{ts} field (epoch milliseconds) is converted
+        to a proper \texttt{TIMESTAMP(3)} via \texttt{TO\_TIMESTAMP\_LTZ(ts / 1000, 3)}.
+  \item \textbf{Partition columns} — \texttt{year\_}, \texttt{month\_}, \texttt{day\_}, \texttt{hour\_}
+        are derived from the timestamp for efficient Snowflake partitioning.
+  \item \textbf{String decoding UDF} — artist and song names in \texttt{listen\_events} and
+        \texttt{page\_view\_events} are stored in a latin1 unicode-escape encoding.
+        A Python UDF \texttt{string\_decode} converts them to UTF-8 before writing.
+  \item \textbf{Processing timestamp} — \texttt{CURRENT\_TIMESTAMP} is appended as \texttt{processed\_time}
+        to track pipeline latency.
+\end{itemize}
+
+All three INSERT statements are registered in a single \texttt{StatementSet} and submitted as
+\textbf{one Flink job}, sharing one checkpoint cycle and one set of TaskManager slots:
+
+\begin{lstlisting}[language=bash, caption={Submitting the PyFlink job after \texttt{docker compose up}.}]
+docker exec -it flink-jobmanager \
+    flink run -py /opt/flink/jobs/stream_events.py
+\end{lstlisting}

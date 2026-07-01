@@ -1,0 +1,155 @@
+\documentclass[12pt, a4paper]{report}
+
+% ── Encoding & fonts ──────────────────────────────────────────────────────────
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+
+% ── Layout ────────────────────────────────────────────────────────────────────
+\usepackage[a4paper, margin=2.5cm, top=3cm, bottom=3cm]{geometry}
+\usepackage{setspace}
+\onehalfspacing
+
+% ── Graphics & color ──────────────────────────────────────────────────────────
+\usepackage{graphicx}
+\usepackage[dvipsnames, svgnames, table]{xcolor}
+
+% ── Tables ────────────────────────────────────────────────────────────────────
+\usepackage{booktabs}
+\usepackage{tabularx}
+
+% ── Code listings ─────────────────────────────────────────────────────────────
+\usepackage{listings}
+\renewcommand{\lstlistlistingname}{List of Listings}
+\renewcommand{\lstlistingname}{Listing}
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!10},
+  keywordstyle=\color{NavyBlue}\bfseries,
+  commentstyle=\color{ForestGreen},
+  stringstyle=\color{BrickRed},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  numbersep=8pt,
+}
+
+% ── Hyperlinks ────────────────────────────────────────────────────────────────
+\usepackage[colorlinks=true, linkcolor=NavyBlue, citecolor=ForestGreen, urlcolor=BrickRed]{hyperref}
+
+% ── Headers & footers ─────────────────────────────────────────────────────────
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\leftmark}
+\fancyhead[R]{\small Viettel Digital Talent}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+% Plain style (TOC, LOF, LOT pages): only page number, no header rule
+\fancypagestyle{plain}{%
+  \fancyhf{}%
+  \fancyfoot[C]{\thepage}%
+  \renewcommand{\headrulewidth}{0pt}%
+}
+
+% ── Math ──────────────────────────────────────────────────────────────────────
+\usepackage{amsmath, amssymb}
+
+% ── Callout boxes ─────────────────────────────────────────────────────────────
+\usepackage[most]{tcolorbox}
+
+% ── List formatting (tocloft) ─────────────────────────────────────────────────
+\usepackage{tocloft}
+% TOC depth: show up to subsection
+\setcounter{tocdepth}{2}
+% Dot leaders in TOC
+\renewcommand{\cftchapleader}{\cftdotfill{\cftdotsep}}
+
+% ── Misc ──────────────────────────────────────────────────────────────────────
+\usepackage{enumitem}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\begin{document}
+
+% ══════════════════════════════════════════════════════════════════════════════
+%  COVER PAGE
+% ══════════════════════════════════════════════════════════════════════════════
+\begin{titlepage}
+  \centering
+  \vspace*{1.5cm}
+
+  {\Large\bfseries VIETTEL DIGITAL TALENT 2026}\\[0.4cm]
+  {\large\itshape DATA ENGINEER}\\[0.3cm]
+  \noindent\rule{\textwidth}{0.8pt}
+
+  \vspace{2.5cm}
+
+  {\fontsize{22}{28}\selectfont\bfseries
+    Streaming Processing\\[0.25cm]
+    in BigData Platform}
+
+  \vspace{1cm}
+
+  {\large\color{gray} A comprehensive study of real-time data pipelines\\
+  using Apache Kafka and Apache Flink}
+
+  \vspace{3.5cm}
+
+  \begin{tabular}{@{}ll@{}}
+    \textbf{Mentor}  & : Nguyen Minh Hieu \\[0.6cm]
+    \textbf{Student} & : Ngo Quang Hieu   \\
+  \end{tabular}
+
+  \vfill
+
+  \noindent\rule{\textwidth}{0.4pt}\\[0.3cm]
+  {\large\today}
+\end{titlepage}
+
+% ══════════════════════════════════════════════════════════════════════════════
+%  FRONT MATTER
+% ══════════════════════════════════════════════════════════════════════════════
+\pagenumbering{roman}
+
+% ── Table of Contents ─────────────────────────────────────────────────────────
+\tableofcontents
+\clearpage
+
+% ── List of Figures ───────────────────────────────────────────────────────────
+\phantomsection
+\addcontentsline{toc}{chapter}{List of Figures}
+\listoffigures
+\clearpage
+
+% ── List of Tables ────────────────────────────────────────────────────────────
+\phantomsection
+\addcontentsline{toc}{chapter}{List of Tables}
+\listoftables
+\clearpage
+
+% ── List of Listings ──────────────────────────────────────────────────────────
+\phantomsection
+\addcontentsline{toc}{chapter}{List of Listings}
+\lstlistoflistings
+\clearpage
+
+\pagenumbering{arabic}
+
+% ══════════════════════════════════════════════════════════════════════════════
+%  CHAPTERS
+% ══════════════════════════════════════════════════════════════════════════════
+\include{chapters/01_introduction/main}
+\include{chapters/02_kafka/main}
+\include{chapters/03_streaming_engines/main}
+\include{chapters/04_application/main}
+
+% ══════════════════════════════════════════════════════════════════════════════
+%  BIBLIOGRAPHY
+% ══════════════════════════════════════════════════════════════════════════════
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}

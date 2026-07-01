@@ -1,0 +1,23 @@
+\section{Problem Statement}
+
+A music streaming platform generates three distinct categories of events in real time:
+
+\begin{itemize}
+  \item \textbf{Song-play events} (\texttt{listen\_events}) — fired each time a user starts playing a track, carrying metadata such as artist name, song title, duration, user location, and session information.
+  \item \textbf{Page-view events} (\texttt{page\_view\_events}) — fired on every navigation action (e.g.\ visiting the home page, search results, or an artist profile), capturing HTTP method, status code, and user context.
+  \item \textbf{Authentication events} (\texttt{auth\_events}) — fired on login and logout, recording session validity and subscription level.
+\end{itemize}
+
+Processing these events in batch is insufficient for several reasons:
+
+\begin{enumerate}
+  \item \textbf{Velocity} — a realistic platform generates thousands of events per second; buffering them for hours before processing wastes the time-sensitivity of the data.
+  \item \textbf{Volume} — accumulated event data grows rapidly; a pure batch approach requires ever-larger processing windows and infrastructure.
+  \item \textbf{Variety} — the three event types have different schemas, require different transformations, and must eventually be joined with dimension data (users, songs, artists) for analytics.
+  \item \textbf{Reliability} — any processing outage must not result in data loss; the pipeline must be able to resume exactly where it left off.
+\end{enumerate}
+
+The core challenge addressed in this report is therefore:
+\textit{how to design and implement a fault-tolerant, low-latency streaming pipeline that
+ingests heterogeneous music events, transforms and enriches them in real time, and delivers
+clean analytical data to a cloud data warehouse — all without data loss or duplicate records.}

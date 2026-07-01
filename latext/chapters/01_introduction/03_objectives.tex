@@ -1,0 +1,23 @@
+\section{Objectives}
+
+This report and the accompanying project pursue the following objectives:
+
+\begin{enumerate}
+  \item \textbf{Survey stream-processing concepts} — introduce the theoretical foundations of stream processing, including event time, watermarks, stateful computation, fault tolerance, and delivery semantics (at-most-once, at-least-once, exactly-once).
+
+  \item \textbf{Evaluate Apache Kafka as a message queue} — examine Kafka's architecture (brokers, topics, partitions, consumer groups), its evolution from ZooKeeper-based coordination to the self-managed KRaft consensus protocol, and its suitability as the event transport layer for high-throughput streaming pipelines.
+
+  \item \textbf{Compare Apache Spark and Apache Flink} — provide a detailed, side-by-side analysis of the two dominant open-source stream-processing engines, covering their execution models (micro-batch vs.\ true streaming), fault-tolerance mechanisms, state backends, and applicable use cases.
+
+  \item \textbf{Design and implement Streamify} — build a complete, containerised, end-to-end data pipeline that:
+    \begin{itemize}
+      \item simulates realistic music streaming events using Eventsim;
+      \item transports events through Apache Kafka;
+      \item processes and enriches them in real time with Apache Flink (PyFlink);
+      \item writes clean records to a Snowflake cloud data warehouse;
+      \item models the data into a star schema and a wide table using dbt;
+      \item orchestrates daily dbt runs with Apache Airflow.
+    \end{itemize}
+
+  \item \textbf{Visualise insights} — connect Power BI to the star schema in Snowflake and build an interactive dashboard that surfaces key business metrics such as top artists, play counts by location, and subscription-tier distribution.
+\end{enumerate}

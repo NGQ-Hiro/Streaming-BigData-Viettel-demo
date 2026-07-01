@@ -1,0 +1,20 @@
+\section{Scope}
+
+\subsection*{In Scope}
+\begin{itemize}
+  \item Design and implementation of the full streaming pipeline from event generation to BI dashboard.
+  \item Theoretical coverage of Apache Kafka, Apache Spark Structured Streaming, and Apache Flink.
+  \item Comparison of Spark micro-batch and continuous (RTM) execution modes against Flink's true-streaming model.
+  \item Kafka's metadata evolution: ZooKeeper-based coordination vs.\ the KRaft self-managed consensus protocol.
+  \item Data modelling with dbt (star schema + wide table) and orchestration with Apache Airflow.
+  \item Local deployment using Docker Compose for full reproducibility.
+\end{itemize}
+
+\subsection*{Out of Scope}
+\begin{itemize}
+  \item Machine-learning inference on live event streams (e.g.\ real-time recommendation models).
+  \item Multi-region or cloud-native Kubernetes deployment of the Flink or Kafka clusters.
+  \item Production-grade SLA tuning, capacity planning, or cost optimisation.
+  \item Schema evolution and backward/forward compatibility strategies for Kafka topics.
+  \item Security hardening (TLS, SASL authentication, Snowflake private link).
+\end{itemize}

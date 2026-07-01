@@ -1,0 +1,12 @@
+\section{Why Apache Flink Was Chosen for Streamify}
+
+% TODO: Justify the choice — lower latency, better event-time semantics,
+%       StatementSet for multi-sink jobs, and the growing adoption in production.
+
+\begin{enumerate}
+  \item \textbf{Lower latency} — true event-at-a-time processing meets the real-time requirement; no trigger interval floor.
+  \item \textbf{Event-time accuracy} — out-of-order Eventsim events are handled correctly via watermarks without extra workarounds.
+  \item \textbf{Multi-sink StatementSet} — three Kafka topics can be written to Snowflake in a single Flink job with one \texttt{StatementSet.execute()} call.
+  \item \textbf{Python support (PyFlink)} — Table API and Python UDFs enable clean, maintainable code without requiring Java or Scala.
+  \item \textbf{Native exactly-once} — Flink's 2PC checkpointing integrates directly with the JDBC sink, removing the need for application-level idempotency logic.
+\end{enumerate}

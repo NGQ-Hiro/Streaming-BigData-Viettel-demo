@@ -1,0 +1,71 @@
+\section{From ZooKeeper to KRaft: Kafka's Metadata Evolution}
+
+% TODO: Explain why ZooKeeper was originally used, what problems it caused
+%       (separate cluster to operate, scalability ceiling, split-brain risk),
+%       and how KRaft (KIP-500) eliminates the dependency entirely.
+
+\subsection{The ZooKeeper Era}
+
+For its first decade, Kafka relied on \textbf{Apache ZooKeeper} to manage all
+cluster metadata:
+
+\begin{itemize}
+  \item \textbf{Broker registration} — each broker registered itself in ZooKeeper on startup; clients discovered brokers via ZooKeeper znodes.
+  \item \textbf{Controller election} — one broker was elected the \emph{controller} via a ZooKeeper ephemeral node; it was responsible for leader elections and partition reassignments.
+  \item \textbf{Topic and partition metadata} — partition-to-broker assignments, ISR lists, and configuration overrides were stored in ZooKeeper.
+\end{itemize}
+
+\begin{figure}[H]
+  \centering
+  \fbox{\parbox{0.85\textwidth}{\centering\vspace{2.5cm}[Kafka + ZooKeeper Architecture]\vspace{2.5cm}}}
+  \caption{Kafka cluster with ZooKeeper for metadata management (legacy mode).}
+  \label{fig:kafka-zk}
+\end{figure}
+
+\textbf{Pain points of the ZooKeeper dependency:}
+\begin{itemize}
+  \item Operators had to maintain a \emph{separate} ZooKeeper ensemble (typically 3–5 nodes) alongside the Kafka cluster.
+  \item ZooKeeper became a scalability bottleneck: clusters with millions of partitions overwhelmed the ZooKeeper write path.
+  \item Controller failover required a full ZooKeeper session timeout, causing 20–30 second leadership gaps.
+  \item Security and monitoring configurations were duplicated across two systems.
+\end{itemize}
+
+\subsection{The KRaft Era (Kafka without ZooKeeper)}
+
+\textbf{KIP-500} (released preview in Kafka 2.8, production-ready in Kafka 3.3)
+introduced \textbf{KRaft} — Kafka Raft — a built-in consensus protocol that
+replaces ZooKeeper entirely.
+
+\begin{figure}[H]
+  \centering
+  \fbox{\parbox{0.85\textwidth}{\centering\vspace{2.5cm}[Kafka KRaft Architecture]\vspace{2.5cm}}}
+  \caption{Kafka cluster in KRaft mode: no external ZooKeeper required.}
+  \label{fig:kafka-kraft}
+\end{figure}
+
+In KRaft mode:
+\begin{itemize}
+  \item A subset of brokers are designated \textbf{controllers}; they form a Raft quorum and store all metadata in an internal \textbf{metadata log} (a special Kafka topic: \texttt{\_\_cluster\_metadata}).
+  \item All other brokers are \textbf{followers} that subscribe to the metadata log and maintain a local in-memory cache — no ZooKeeper znodes, no separate cluster.
+  \item Controller failover is now a \textbf{Raft leader election}, completing in milliseconds instead of tens of seconds.
+  \item The metadata log can handle millions of partitions without the write-path bottleneck seen with ZooKeeper.
+\end{itemize}
+
+\begin{table}[H]
+  \centering
+  \caption{ZooKeeper mode vs KRaft mode.}
+  \label{tab:zk-vs-kraft}
+  \begin{tabularx}{\textwidth}{lXX}
+    \toprule
+    \textbf{Dimension}        & \textbf{ZooKeeper Mode}               & \textbf{KRaft Mode} \\
+    \midrule
+    External dependency       & ZooKeeper ensemble (3–5 nodes)        & None \\
+    Metadata storage          & ZooKeeper znodes                      & Internal \texttt{\_\_cluster\_metadata} topic \\
+    Controller failover time  & 20–30 seconds (ZK session timeout)    & Milliseconds (Raft leader election) \\
+    Partition scalability     & $\sim$200k partitions practical limit & Millions of partitions \\
+    Operational complexity    & Two systems to configure \& monitor   & Single Kafka cluster \\
+    Security model            & Separate ACLs on ZooKeeper            & Unified Kafka ACLs \\
+    Production readiness      & Deprecated (Kafka 3.5+)               & Production-ready from Kafka 3.3 \\
+    \bottomrule
+  \end{tabularx}
+\end{table}

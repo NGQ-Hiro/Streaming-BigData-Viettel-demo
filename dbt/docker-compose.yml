@@ -1,0 +1,9 @@
+services:
+  dbt:
+    container_name: dbt_container
+    image: ghcr.io/dbt-labs/dbt-snowflake:1.8.2
+    volumes:
+      - ./my_project:/usr/app
+      - .:/root/.dbt
+    working_dir: /usr/app
+    command: docs generate

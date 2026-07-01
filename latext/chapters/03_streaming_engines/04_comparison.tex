@@ -1,0 +1,25 @@
+\section{Comparison: Spark vs Flink}
+
+\begin{table}[H]
+  \centering
+  \caption{Apache Spark Structured Streaming vs Apache Flink.}
+  \label{tab:spark-vs-flink}
+  \begin{tabularx}{\textwidth}{lXXX}
+    \toprule
+    \textbf{Dimension} & \textbf{Spark Micro-batch} & \textbf{Spark Real-time Mode (Spark 4, preview)} & \textbf{Apache Flink} \\
+    \midrule
+    Processing model  & Mini-batch per trigger interval        & Long window (5 min default); continuous data flow inside & True streaming (event-by-event) \\
+    Stage scheduling  & Sequential                             & Concurrent                                               & Pipelined DAG (concurrent) \\
+    Latency           & 100\,ms – seconds                      & Sub-100\,ms ($\sim$2 orders of magnitude vs micro-batch) & Sub-millisecond to milliseconds \\
+    Stateful ops      & Full                                   & Full, incl.\ \texttt{TransformWithState}                 & Full (aggregations, CEP, joins) \\
+    State backend     & Heap / RocksDB (Spark 3.2+)            & Heap / RocksDB + incremental state cleanup               & Heap (HashMapStateBackend) / RocksDB \\
+    Event-time        & Watermarking on DataFrames             & Watermarking on DataFrames                               & First-class, fine-grained watermarks \\
+    Fault tolerance   & WAL + Checkpoint v1                    & Checkpoint v2 (offset at end + unique ID)                & Chandy-Lamport async snapshots \\
+    Exactly-once      & With idempotent / transactional sinks  & Yes — same guarantee as micro-batch                      & Native 2PC with compatible sinks \\
+    API               & DataFrame / SQL, trigger-based         & Same DataFrame / SQL; change trigger only                & DataStream + Table API / SQL \\
+    Availability      & Stable, open source                    & Public preview (Databricks); open-source pending         & Stable, open source \\
+    Ecosystem         & Very large (MLlib, Delta, …)           & Shares full Spark ecosystem                              & Growing (Flink ML, Paimon) \\
+    Ease of use       & Easier — unified batch+stream          & Zero query changes — only switch trigger                 & Steeper learning curve \\
+    \bottomrule
+  \end{tabularx}
+\end{table}

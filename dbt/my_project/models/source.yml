@@ -1,0 +1,11 @@
+
+sources:
+  - name: staging          # logical name for the source
+    database: STREAMIFY         # Snowflake database
+    schema: STAGING           # Snowflake schema
+    tables:
+      - name: listen_events     
+      - name: page_view_events    
+      - name: auth_events        
+      - name: songs 
+      - name: state_codes

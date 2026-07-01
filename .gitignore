@@ -1,0 +1,11 @@
+spark_streaming/*
+!spark_streaming/jobs
+
+dbt/*
+!dbt/my_project
+!dbt/docker-compose.yml
+
+postgres
+airflow.env
+airflow/*
+!airflow/dags

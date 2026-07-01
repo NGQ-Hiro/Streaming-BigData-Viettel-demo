@@ -1,0 +1,28 @@
+\section{Report Structure}
+
+The remainder of this report is organised as follows:
+
+\begin{description}
+  \item[Chapter 2 — Message Queue: Apache Kafka] \hfill \\
+    Introduces Apache Kafka as the event transport backbone of the pipeline.
+    It explains why a durable message queue is necessary in distributed systems,
+    walks through Kafka's core components (producers, brokers, topics, partitions,
+    consumer groups), surveys common industry use cases, and traces Kafka's
+    metadata architecture evolution from ZooKeeper to the modern KRaft protocol.
+
+  \item[Chapter 3 — Streaming Processing Engines: Spark vs.\ Flink] \hfill \\
+    Provides an in-depth comparison of the two leading open-source stream-processing
+    frameworks. The chapter covers Apache Spark's micro-batch and continuous
+    processing modes, then Apache Flink's true-streaming dataflow model.
+    For each engine, the internal mechanisms — checkpointing, state storage,
+    fault tolerance, and delivery semantics — are examined in detail.
+    A side-by-side comparison table and a justification for choosing Flink in
+    the Streamify project conclude the chapter.
+
+  \item[Chapter 4 — Application: Streamify Pipeline] \hfill \\
+    Presents the practical implementation of the Streamify project.
+    It describes the full technology stack, the event simulation layer (Eventsim),
+    the PyFlink streaming job that reads from Kafka and writes to Snowflake,
+    the dbt data models that transform raw events into a star schema, and
+    the Power BI dashboard that visualises the resulting business insights.
+\end{description}
