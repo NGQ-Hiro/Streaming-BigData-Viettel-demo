@@ -64,6 +64,10 @@
 % Dot leaders in TOC
 \renewcommand{\cftchapleader}{\cftdotfill{\cftdotsep}}
 
+% ── Bibliography (BibLaTeX + Biber) ───────────────────────────────────────────
+\usepackage[backend=biber, style=numeric, sorting=nyt]{biblatex}
+\addbibresource{references.bib}
+
 % ── Misc ──────────────────────────────────────────────────────────────────────
 \usepackage{enumitem}
 \usepackage{float}
@@ -148,7 +152,6 @@
 % ══════════════════════════════════════════════════════════════════════════════
 %  BIBLIOGRAPHY
 % ══════════════════════════════════════════════════════════════════════════════
-\bibliographystyle{plain}
-\bibliography{references}
+\printbibliography[heading=bibintoc, title={References}]
 
 \end{document}

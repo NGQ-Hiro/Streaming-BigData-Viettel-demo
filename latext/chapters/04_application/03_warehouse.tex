@@ -1,12 +1,37 @@
+% !TEX root = ../../main.tex
 \section{Data Warehouse, Modelling, and Orchestration}
 
-Once raw events land in Snowflake's \texttt{STAGING} schema, two additional layers convert them
-into analytics-ready models: dbt handles the transformation logic,
-and Airflow schedules the daily refresh.
+The warehouse layer is organised into four progressive tiers, each serving a distinct purpose
+in the ELT pipeline.
+
+\subsection{Layered Data Architecture}
+
+\begin{description}
+  \item[Landing Zone] Raw JSON events written directly by Flink via JDBC into Snowflake's
+    \texttt{STAGING} schema.
+    No transformation is applied at this stage — the data is an exact copy of what arrived
+    from Kafka, preserving the original schema and timestamps for auditability.
+
+  \item[Bronze — Deduplication] The first dbt layer reads from the landing zone and removes
+    duplicate events using event identifiers and timestamps.
+    Duplicates can arise from Flink checkpoint recovery replaying the last partially-flushed
+    batch; the bronze layer eliminates them before any analytical modelling begins.
+
+  \item[Silver — Star Schema] Cleaned bronze records are modelled into a normalised
+    star schema (described in detail below): one central \texttt{fact\_streams} table and five
+    dimension tables (\texttt{dim\_users}, \texttt{dim\_songs}, \texttt{dim\_artists},
+    \texttt{dim\_locations}, \texttt{dim\_datetime}).
+    This layer optimises for storage efficiency and data integrity.
+
+  \item[Gold — Wide Table] The \texttt{wide\_streams} view pre-joins \texttt{fact\_streams}
+    with all five dimension tables into a single flat table.
+    It exists solely to simplify BI queries: Power BI users access one table with no runtime
+    JOIN logic, significantly improving dashboard query performance.
+\end{description}
 
 \subsection{Star Schema with dbt}
 
-dbt (data build tool) runs SQL transformations \emph{inside} Snowflake using the ELT pattern —
+dbt~\cite{dbt} (data build tool) runs SQL transformations \emph{inside} Snowflake~\cite{snowflake} using the ELT pattern —
 data is loaded first, then transformed in place, leveraging Snowflake's elastic compute.
 
 \begin{figure}[H]
@@ -44,7 +69,7 @@ The dbt project produces two model layers:
 
 \subsection{Orchestration with Apache Airflow}
 
-The Airflow DAG (\texttt{airflow/dags/dbt.py}) runs on a \textbf{daily schedule} and contains a
+The Airflow~\cite{airflow} DAG (\texttt{airflow/dags/dbt.py}) runs on a \textbf{daily schedule} and contains a
 single task: a \texttt{DockerOperator} that spins up the official
 \texttt{ghcr.io/dbt-labs/dbt-snowflake} container and executes \texttt{dbt run}
 against the Snowflake warehouse.

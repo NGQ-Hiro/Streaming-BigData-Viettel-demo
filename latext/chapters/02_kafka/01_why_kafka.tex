@@ -1,7 +1,10 @@
+% !TEX root = ../../main.tex
 \section{Why Do We Need Kafka}
 
 \subsection{The Problem with Direct Communication}
 
+Apache Kafka~\cite{kafka,kreps2011kafka} is a distributed event-streaming platform
+designed to decouple producers from consumers at scale.
 In a naive distributed system, services communicate directly: a producer service calls a
 consumer service's API whenever it has new data to share.
 This point-to-point architecture quickly breaks down as the system grows:

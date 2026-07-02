@@ -1,3 +1,4 @@
+% !TEX root = ../../main.tex
 \section{Results, Dashboard, and Conclusion}
 
 \subsection{Power BI Dashboard}
@@ -23,6 +24,64 @@ Key metrics and visualisations on the dashboard:
   \item \textbf{Subscription tier breakdown} — donut chart comparing free vs.\ paid listener proportions.
   \item \textbf{Session activity} — table showing active user sessions, authentication success rates, and average session duration.
 \end{itemize}
+
+\subsection{Observability: Prometheus and Grafana}
+
+A Prometheus~\cite{prometheus} and Grafana~\cite{grafana} monitoring stack runs alongside the pipeline, providing real-time
+visibility into both the Kafka transport layer and the Flink processing layer.
+
+\subsubsection{Metrics Collection}
+
+Two exporters feed Prometheus:
+\begin{itemize}
+  \item \textbf{Flink Prometheus Reporter} — Flink's built-in reporter
+        (\texttt{flink-metrics-prometheus}) exposes JVM and operator metrics on port \texttt{9249}
+        of each Flink container.
+        The JobManager and all three TaskManagers each serve their own metrics endpoint.
+        Because the TaskManagers run as Docker Compose~\cite{docker_compose} replicas with no fixed hostname,
+        Prometheus uses DNS A-record discovery~\cite{prometheus_sd} (\texttt{dns\_sd\_configs}) to automatically
+        locate all replica endpoints without manual configuration.
+  \item \textbf{kafka-exporter} — the \texttt{danielqsj/kafka-exporter} image connects to all
+        three Kafka brokers and exposes consumer-group lag, topic offset, and partition metrics
+        on port \texttt{9308}.
+        The exporter is configured with \texttt{restart: on-failure} so that it recovers
+        automatically if it starts before the brokers are ready to accept connections.
+\end{itemize}
+
+Prometheus scrapes all targets every 15 seconds and persists the time-series data to a named
+Docker volume (\texttt{prometheus-data}) to survive container restarts.
+
+\subsubsection{Grafana Dashboards}
+
+Three pre-built dashboards are provisioned automatically via Grafana's file-based provisioning:
+
+\begin{enumerate}
+  \item \textbf{Kafka Lag} — displays \texttt{kafka\_consumergroup\_lag} summed by topic and
+        consumer group, and the consumption rate derived from
+        \texttt{rate(kafka\_consumergroup\_current\_offset[5m])}.
+        Consumer-group offsets only appear in Kafka after Flink commits them on a checkpoint;
+        enabling the 10-second checkpoint interval (Section~\ref{sec:flink}) is therefore a
+        prerequisite for this dashboard to show data.
+
+  \item \textbf{Flink Record Processing} — shows records ingested per second using the
+        operator-scope metric
+        \texttt{flink\_taskmanager\_job\_task\_operator\_numRecordsOutPerSecond}
+        filtered to \texttt{operator\_name =\textasciitilde "Source.*"}.
+        Task-level counters (\texttt{numRecordsIn/Out}) read zero for chained
+        Source$\to$UDF$\to$Sink pipelines; the operator-scope metric is the correct
+        alternative.
+
+  \item \textbf{Flink CPU / Memory} — three sections (CPU, Memory, Network) show:
+        JVM CPU load per TaskManager and JobManager;
+        heap used and Flink managed memory per TaskManager;
+        and network direct-memory usage alongside input/output buffer pool utilisation.
+        Buffer pool usage approaching 1.0 indicates back-pressure — records accumulating
+        faster than the downstream operator can consume them.
+\end{enumerate}
+
+Dashboards are provisioned automatically using Grafana's file-based provisioning~\cite{grafana_provisioning}.
+Grafana is available at \texttt{http://localhost:3000} (credentials: \texttt{admin}/\texttt{admin}).
+Prometheus is available at \texttt{http://localhost:9090}.
 
 \subsection{Pipeline Evaluation}
 
@@ -87,16 +146,22 @@ while handling backpressure and exactly-once delivery natively.
 \subsection{Conclusion and Future Work}
 
 The Streamify project demonstrates a complete, production-pattern streaming pipeline built
-on Apache Kafka and Apache Flink.
-The migration from Spark Structured Streaming to PyFlink was transparent to all downstream
-components (Snowflake, dbt, Airflow, Power BI) — confirming that the processing layer can be
-swapped independently of the rest of the stack.
+on Apache Kafka and Apache Flink, with end-to-end observability provided by Prometheus and Grafana.
 
 Key takeaways:
 \begin{itemize}
-  \item Kafka provides reliable, replay-capable event transport with zero changes required to producers or consumers when the processing engine changes.
-  \item Flink's Table API and StatementSet pattern allow three independent Kafka→Snowflake pipelines to run as a single job with one shared checkpoint cycle.
-  \item The ELT pattern (Flink loads raw data; dbt transforms inside Snowflake) cleanly separates streaming concerns from analytical modelling concerns.
+  \item \textbf{Kafka} provides reliable, replay-capable event transport. A 3-node KRaft cluster
+        with replication factor 3 and 3 partitions per topic ensures fault tolerance and enables
+        maximum parallelism for downstream consumers.
+  \item \textbf{Flink} delivers sub-10\,ms processing latency with exactly-once guarantees.
+        Scaling to 3 TaskManagers at parallelism 3 matches the Kafka partition count exactly,
+        distributing the workload evenly with one full pipeline per TaskManager.
+  \item \textbf{The ELT pattern} cleanly separates streaming concerns from analytical modelling:
+        Flink loads raw events into the landing zone; dbt transforms them through
+        bronze $\to$ silver $\to$ gold layers inside Snowflake.
+  \item \textbf{Observability} closes the loop: Prometheus and Grafana confirm that the pipeline
+        is healthy by surfacing Kafka consumer-group lag, Flink record throughput, and
+        per-TaskManager resource utilisation in real time.
 \end{itemize}
 
 Directions for future work:

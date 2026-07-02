@@ -1,3 +1,4 @@
+% !TEX root = ../../main.tex
 \section{Project Overview and Technology Stack}
 
 \textit{Streamify} is an end-to-end data engineering project that simulates, processes,
@@ -14,7 +15,7 @@ real-world architecture.
   \label{fig:streamify-arch}
 \end{figure}
 
-The platform is composed of seven layers, each implemented with a best-of-breed open-source
+The platform is composed of nine layers, each implemented with a best-of-breed open-source
 or cloud-native tool:
 
 \begin{table}[H]
@@ -26,17 +27,48 @@ or cloud-native tool:
     \textbf{Layer}       & \textbf{Tool}              & \textbf{Role} \\
     \midrule
     Data simulation      & Eventsim                   & Generates synthetic music-streaming events based on the Million Songs Dataset. \\
-    Message queue        & Apache Kafka (Confluent)   & Durable, partitioned event transport with Schema Registry and Control Center. \\
-    Stream processing    & Apache Flink (PyFlink)     & Real-time JSON parsing, timestamp enrichment, and exactly-once sink to Snowflake. \\
+    Message queue        & Apache Kafka 4.3 (KRaft)   & Durable, partitioned event transport running as a 3-node cluster with replication factor 3 and 3 partitions per topic — no Zookeeper required. \\
+    Stream processing    & Apache Flink 1.18 (PyFlink) & Real-time JSON parsing, timestamp enrichment, and sink to Snowflake; scaled to 3 TaskManagers with parallelism 3 to match Kafka partitions. \\
     Data warehouse       & Snowflake                  & Cloud-native, elastic analytical storage; receives raw streaming data from Flink. \\
     Transformation       & dbt                        & SQL-based star-schema and wide-table modelling directly inside Snowflake. \\
     Orchestration        & Apache Airflow             & Schedules daily dbt runs via a DockerOperator DAG. \\
     Visualisation        & Power BI                   & Interactive dashboards connected to the star schema in Snowflake. \\
+    Monitoring           & Prometheus \& Grafana      & Real-time observability for Kafka consumer-group lag, Flink record throughput, and per-TaskManager CPU and memory; metrics scraped via Flink's Prometheus reporter and kafka-exporter. \\
     Containerisation     & Docker Compose             & Single-command reproducible deployment of the full stack on any machine. \\
     \bottomrule
   \end{tabularx}
 \end{table}
 
-All services run locally via \texttt{docker compose up --build}.
-The Flink Web UI is available at \texttt{http://localhost:8083} and the
-Kafka Control Center at \texttt{http://localhost:9021}.
+\subsection*{Scaling Design}
+
+A key design goal of Streamify is to demonstrate horizontal scalability at both the
+ingestion and processing layers.
+
+\textbf{Kafka} runs as a three-node KRaft cluster (brokers \texttt{broker-1},
+\texttt{broker-2}, \texttt{broker-3}).
+Each of the three event topics (\texttt{listen\_events}, \texttt{page\_view\_events},
+\texttt{auth\_events}) is created with three partitions and replication factor three,
+so every partition has a replica on each broker — guaranteeing no data loss if one
+broker restarts.
+
+\textbf{Flink} is scaled to three TaskManagers, each with four task slots, and the
+PyFlink job runs at parallelism 3.
+With slot sharing enabled, each TaskManager handles one complete
+Source $\to$ UDF $\to$ Sink pipeline, consuming one partition of each topic in parallel.
+The \texttt{cluster.evenly-spread-out-slots} option ensures work is distributed evenly
+rather than packed onto a single TaskManager.
+Ten-second checkpointing is enabled so that Flink commits consumer-group offsets back to
+Kafka, making consumer-lag visible to the monitoring stack.
+
+\textbf{Monitoring} is provided by a Prometheus + Grafana stack with three pre-built
+dashboards:
+\begin{itemize}
+  \item \textbf{Kafka Lag} — consumer-group lag and consumption rate per topic, sourced from \texttt{kafka-exporter}.
+  \item \textbf{Flink Record Processing} — records ingested per second per source operator, sourced from Flink's native Prometheus reporter.
+  \item \textbf{Flink CPU / Memory} — per-TaskManager JVM CPU load, heap usage, and managed memory breakdown.
+\end{itemize}
+
+All services start automatically via \texttt{docker compose up --build}.
+The Flink Web UI is available at \texttt{http://localhost:8083},
+Prometheus at \texttt{http://localhost:9090}, and
+Grafana at \texttt{http://localhost:3000}.

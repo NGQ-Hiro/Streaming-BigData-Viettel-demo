@@ -1,7 +1,8 @@
+% !TEX root = ../../main.tex
 \section{Streaming Pipeline: Eventsim → Kafka → Flink → Snowflake}
 
-This section walks through the three active stages of the real-time pipeline:
-event generation, message transport, and stream processing.
+This section walks through the four active stages of the real-time pipeline:
+event generation, message transport, stream processing, and observability.
 
 \subsection{Event Simulation with Eventsim}
 
@@ -21,14 +22,59 @@ and emits each interaction as a JSON event to a Kafka topic.
       \item \texttt{page\_view\_events} — page name, HTTP method, status code, session ID, user context.
       \item \texttt{auth\_events} — session ID, success/failure flag, subscription level, timestamp.
     \end{itemize}
-  \item The Confluent Schema Registry (port \texttt{8081}) enforces JSON schemas on each topic,
-        preventing schema drift from corrupting downstream consumers.
+  \item Eventsim~\cite{eventsim} runs as a Docker Compose~\cite{docker_compose} service that starts automatically after the Kafka topics
+        are created by \texttt{kafka-init}, using \texttt{depends\_on: service\_completed\_successfully}
+        to enforce ordering.
+  \item The simulation window is set to \texttt{start = now}, \texttt{end = now + 24 hours} using
+        GNU \texttt{date} inside the container, so the event timestamps are always anchored to
+        the current wall-clock time.
 \end{itemize}
 
-\subsection{Flink Streaming Job}
+\subsection{Apache Kafka: 3-Node KRaft Cluster}
 
-The PyFlink job (\texttt{flink\_streaming/jobs/stream\_events.py}) consumes all three topics in
-a single Flink execution graph using the Table API and Flink SQL.
+The project uses \textbf{Apache Kafka 4.3.0}~\cite{kafka} running in \textbf{KRaft mode}~\cite{kafka_kraft} — the native Kafka
+consensus protocol that eliminates the Zookeeper dependency introduced in earlier versions.
+The cluster consists of three nodes (\texttt{broker-1}, \texttt{broker-2}, \texttt{broker-3}),
+each acting simultaneously as both broker and KRaft controller.
+
+Key cluster configuration:
+\begin{itemize}
+  \item \textbf{Replication factor 3, min ISR 2} — every partition has a replica on each broker,
+        so the cluster tolerates one broker failure without data loss or write interruption.
+  \item \textbf{3 partitions per topic} — each of the three event topics
+        (\texttt{listen\_events}, \texttt{page\_view\_events}, \texttt{auth\_events}) is
+        pre-created with three partitions by the \texttt{kafka-init} service at startup.
+        This matches the Flink parallelism of 3, allowing each TaskManager to own exactly one
+        partition of each topic.
+  \item \textbf{Fixed \texttt{CLUSTER\_ID}} — a static cluster ID ensures all three broker
+        containers format the same KRaft metadata log on every \texttt{compose up}, preventing
+        cluster-ID mismatch errors across restarts.
+\end{itemize}
+
+\subsection{Flink Streaming Job: Scaled Deployment}
+
+The Flink cluster is scaled to \textbf{three TaskManagers}, each allocated 1,728\,MB of process
+memory and four task slots.
+The PyFlink job runs at \textbf{parallelism 3}, and with Flink's default slot-sharing enabled,
+each TaskManager executes one complete Source $\to$ UDF $\to$ Sink pipeline — consuming one
+partition of each topic in parallel.
+The \texttt{cluster.evenly-spread-out-slots: true} option ensures the three task chains are
+distributed evenly across all three TaskManagers rather than being packed onto one.
+
+\textbf{Checkpointing}~\cite{flink_checkpointing} is enabled with a 10-second interval
+(\texttt{env.enable\_checkpointing(10000)}).
+This is essential for two reasons: it provides fault tolerance by snapshotting Flink operator
+state to durable storage, and it causes the Kafka source to commit consumer-group offsets back
+to Kafka on each checkpoint — making the \texttt{flink-streamify} consumer group visible to
+\texttt{kafka-exporter} and therefore to the monitoring dashboards.
+
+\textbf{Auto-submission} is handled by a dedicated \texttt{flink-job-submitter} service that
+waits until at least three free task slots are available, checks whether a job is already
+\texttt{RUNNING} to avoid duplicates on repeated \texttt{compose up} calls, and then submits
+the PyFlink script in detached mode (\texttt{flink run -d}).
+
+The PyFlink job~\cite{flink_pyflink} (\texttt{flink\_streaming/jobs/stream\_events.py}) consumes all three topics in
+a single Flink execution graph using the Table API and Flink SQL~\cite{flink_kafka_connector}.
 
 \subsubsection{Schema and Source Registration}
 

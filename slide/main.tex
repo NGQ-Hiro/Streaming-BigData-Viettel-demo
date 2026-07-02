@@ -6,10 +6,9 @@
 \definecolor{BKTemplate}{rgb}{0.11765, 0.30588, 0.47451}
 \usecolortheme[named=BKTemplate]{structure}
 \setbeamercolor{title}{fg=BKTemplate,bg=}
-\setbeamertemplate{caption}[default]   % no "Figure X:" prefix
+\setbeamertemplate{caption}[default]
 \setbeamertemplate{navigation symbols}{}
 
-% ── No footer bar; page number as plain overlay bottom-right ──────────────────
 \setbeamertemplate{footline}{%
   \hfill%
   \usebeamerfont{page number in head/foot}%
@@ -55,7 +54,7 @@
 
 \begin{document}
 
-% ── Frame 1: Title ────────────────────────────────────────────────────────────
+% ── Title ─────────────────────────────────────────────────────────────────────
 \setbeamertemplate{background canvas}{
   \includegraphics[width=\paperwidth,height=\paperheight]{images/FrontBackgroundvtt.png}
 }
@@ -63,19 +62,16 @@
 \titlepage
 \end{frame}
 
-% ── Background for all remaining slides ───────────────────────────────────────
 \setbeamertemplate{background canvas}{
   \includegraphics[width=\paperwidth,height=\paperheight]{images/Backgroundvtt.png}
 }
 
-% ── Section progress slide at the start of each section ───────────────────────
 \AtBeginSection[]{
   \begin{frame}{Table of Contents}
     \tableofcontents[currentsection, sectionstyle=show/shaded, subsectionstyle=show/show/shaded]
   \end{frame}
 }
 
-% ── Frame 2: Table of Contents ────────────────────────────────────────────────
 \begin{frame}{Table of Contents}
 \tableofcontents
 \end{frame}
@@ -84,21 +80,19 @@
 \section{Introduction}
 %=============================================================================
 
-% ── Frame 3: Why Stream Processing? ──────────────────────────────────────────
 \begin{frame}{Why Stream Processing?}
 \begin{columns}
   \column{0.50\textwidth}
-  \textbf{The Problem}
+  \textbf{The Problem with Batch}
   \begin{itemize}
-    \item \textbf{High latency} — jobs run hourly/daily, so insights lag reality by hours
-    \item \textbf{Stale decisions} — by the time data is processed, the moment to act has passed
+    \item \textbf{High latency} — jobs run hourly/daily, insights lag by hours
+    \item \textbf{Stale decisions} — by the time data is ready, the moment to act has passed
     \item \textbf{Resource spikes} — large periodic loads strain infra, then sit idle
-    % \item \textbf{Costly reprocessing} — a failure mid-job means rerunning the entire batch, not just what's new
   \end{itemize}
 
   \begin{center}
   \begin{tikzpicture}
-    \node[draw, fill=red!10, rounded corners, minimum width=3.2cm, minimum height=0.6cm, align=center, font=\small] (b) {Batch: hours delay};
+    \node[draw, fill=red!10, rounded corners, minimum width=3.2cm, minimum height=0.6cm, align=center, font=\small] (b) {Batch: hours of delay};
     \node[draw, fill=green!15, rounded corners, minimum width=3.2cm, minimum height=0.6cm, align=center, font=\small, below=0.5cm of b] (s) {Stream: milliseconds};
     \draw[-{Stealth}, thick, BKTemplate] (b) -- (s);
   \end{tikzpicture}
@@ -107,41 +101,79 @@
   \column{0.47\textwidth}
   \textbf{Stream Processing Enables}
   \begin{itemize}
-    % \item \textbf{Real-time personalisation} — recommendations/pricing react within ms of user action
-    \item \textbf{Live monitoring \& alerting} — detect anomalies or failures as they happen, not next morning
-    \item \textbf{Continuous aggregation} — dashboards show current counts/metrics, not a stale snapshot
-    \item \textbf{Smooth, steady load} — events processed as they arrive, avoiding the resource spikes of periodic batch runs
+    \item \textbf{Live monitoring \& alerting} — detect anomalies as they happen
+    \item \textbf{Continuous aggregation} — dashboards show current metrics, not a stale snapshot
+    \item \textbf{Smooth, steady load} — events processed as they arrive, no periodic resource spikes
   \end{itemize}
-
 \end{columns}
 \end{frame}
 
-% ── Frame 4: Objectives & Scope ───────────────────────────────────────────────
 \begin{frame}{Objectives}
   \textbf{Objectives}
-  \begin{enumerate}\setlength\itemsep{3pt}
-    \item Overview \textbf{Apache Kafka} as message queue
-    \item Compare \textbf{Spark Streaming vs Flink} for streaming processing
-    \item Build ELT streaming pipeline
-    \item Demonstrate real-time dashboard with live metrics
+  \begin{enumerate}\setlength\itemsep{6pt}
+    \item Overview \textbf{Apache Kafka} as a distributed message queue
+    \item Overview \textbf{Apache Flink} as a real-time stream processing engine
+    \item Build an end-to-end \textbf{ELT streaming pipeline} — from event simulation to BI dashboard
+    \item Demonstrate \textbf{observability} with Prometheus \& Grafana monitoring
   \end{enumerate}
+\end{frame}
 
+%=============================================================================
+\section{Project Architecture}
+%=============================================================================
+
+\begin{frame}{Streamify: End-to-End Architecture}
+\centering
+\includegraphics[width=0.82\textwidth]{app/overview.png}
+\end{frame}
+
+\begin{frame}{Architecture: Layer by Layer}
+\begin{columns}
+  \column{0.50\textwidth}
+  \begin{tikzpicture}[node distance=0.45cm, every node/.style={font=\small}]
+    \node[draw, fill=BKTemplate!15, rounded corners, minimum width=4.0cm, align=center] (ev) {\textbf{Eventsim} — event simulation};
+    \node[draw, fill=BKTemplate!25, rounded corners, minimum width=4.0cm, align=center, below=of ev] (kf) {\textbf{Apache Kafka} — message queue};
+    \node[draw, fill=BKTemplate!35, rounded corners, minimum width=4.0cm, align=center, below=of kf] (fl) {\textbf{Apache Flink} — stream processing};
+    \node[draw, fill=BKTemplate!45, rounded corners, minimum width=4.0cm, align=center, below=of fl] (sf) {\textbf{Snowflake} — data warehouse};
+    \node[draw, fill=BKTemplate!55, rounded corners, minimum width=4.0cm, align=center, below=of sf] (dbt) {\textbf{dbt} — transformation};
+    \node[draw, fill=BKTemplate!65, rounded corners, minimum width=4.0cm, align=center, below=of dbt] (bi) {\textbf{Power BI} — dashboard};
+    \draw[-{Stealth}] (ev) -- (kf);
+    \draw[-{Stealth}] (kf) -- (fl);
+    \draw[-{Stealth}] (fl) -- (sf);
+    \draw[-{Stealth}] (sf) -- (dbt);
+    \draw[-{Stealth}] (dbt) -- (bi);
+  \end{tikzpicture}
+
+  \column{0.47\textwidth}
+  \textbf{3 Event Streams Simulated}
+  \begin{itemize}\small
+    \item \texttt{listen\_events} — song plays, skips, durations
+    \item \texttt{page\_view\_events} — user navigation behaviour
+    \item \texttt{auth\_events} — logins and session events
+  \end{itemize}
+  \vspace{0.3cm}
+  \textbf{Deployment}
+  \begin{itemize}\small
+    \item Fully containerised with \textbf{Docker Compose}
+    \item Single command: \texttt{docker compose up}
+    \item Flink job auto-submitted on startup
+  \end{itemize}
+\end{columns}
 \end{frame}
 
 %=============================================================================
 \section{Message Queue: Apache Kafka}
 %=============================================================================
 
-% ── Frame 5: Why Kafka? ───────────────────────────────────────────────────────
 \begin{frame}{Why Apache Kafka?}
 \begin{columns}
   \column{0.48\textwidth}
   \textbf{Problems Without a Message Queue}
   \begin{itemize}
     \item \textbf{Tight coupling} — producer knows every consumer
-    \item \textbf{No buffering} — slow consumer → data loss
+    \item \textbf{No buffering} — slow consumer $\to$ data loss
     \item \textbf{No replay} — consumed = gone forever
-    \item \textbf{Fan-out cost} — $N$ consumers = $N$ calls
+    \item \textbf{Fan-out cost} — $N$ consumers = $N$ direct calls
   \end{itemize}
 
   \column{0.48\textwidth}
@@ -149,14 +181,13 @@
   \begin{itemize}
     \item \textbf{Decoupling} — write to topic, subscribe independently
     \item \textbf{Durable buffer} — persisted to disk, replicated
-    \item \textbf{Replay} — configurable retention; re-read anytime
+    \item \textbf{Replay} — configurable retention, re-read anytime
     \item \textbf{Scalability} — partitions scale throughput linearly
     \item \textbf{Fan-out free} — multiple groups, own offsets
   \end{itemize}
 \end{columns}
 \end{frame}
 
-% ── Frame 6: Kafka Architecture ───────────────────────────────────────────────
 \begin{frame}{Kafka Architecture}
 \begin{columns}
   \column{0.52\textwidth}
@@ -164,75 +195,72 @@
 
   \column{0.45\textwidth}
   \begin{itemize}
-    \item \textbf{Producer} — partitions by key; batches \& compresses; \texttt{acks=all} for durability
-    \item \textbf{Broker} — leader/follower replicas; append-only log; sequential I/O
-    \item \textbf{Topic} — immutable records; time-based or log-compaction retention
+    \item \textbf{Producer} — partitions by key; \texttt{acks=all} for durability
+    \item \textbf{Broker} — leader/follower replicas; append-only log
+    \item \textbf{Topic} — immutable records; retention-based or compacted
     \item \textbf{Partition} — ordered, offset-indexed; unit of parallelism
-    \item \textbf{Consumer Group} — one partition → one member; independent offset per group
+    \item \textbf{Consumer Group} — one partition $\to$ one member; independent offset per group
   \end{itemize}
   \vspace{0.2cm}
   \small\textit{Max parallelism = number of partitions}
 \end{columns}
 \end{frame}
 
-%=============================================================================
-\section{Streaming Processing Engines}
-%=============================================================================
-
-% ── Frame 7: Batch vs Stream ──────────────────────────────────────────────────
-\begin{frame}{Batch vs.\ Stream Processing}
+\begin{frame}{Kafka Setup in Streamify}
 \begin{columns}
   \column{0.48\textwidth}
-  \begin{block}{Batch Processing}
-    \begin{itemize}
-      \item Collect → store → process in bulk
-      \item Latency: \textbf{hours to days}
-      \item Tools: Hadoop, Spark, scheduled SQL
-    \end{itemize}
-  \end{block}
-  \vspace{0.3cm}
-  \begin{block}{Stream Processing}
-    \begin{itemize}
-      \item Compute \emph{continuously} as records arrive
-      \item Latency: \textbf{milliseconds to seconds}
-      \item Tools: Apache Flink, Spark Streaming
-    \end{itemize}
-  \end{block}
-
-  \column{0.48\textwidth}
-  \textbf{Key Challenges in Streaming}
-  \begin{enumerate}
-    \item \textbf{Unbounded data} — stream never ends; state must be bounded
-    \item \textbf{Out-of-order events} — need watermarks to handle late arrivals
-    \item \textbf{Latency} — must process quickly to keep up with incoming data
-    \item \textbf{Fault tolerance} — recover without loss or duplicates; exactly-once semantics
-    \item \textbf{State \& Checkpoint Management} — large state must be checkpointed to durable storage (e.g., local, cloud)
-  \end{enumerate}
-  \end{columns}
-\end{frame}
-
-% ── Frame 8b: DAG-based Dataflow ─────────────────────────────────────────────
-\begin{frame}{DAG-based Dataflow: Shared Foundation}
-\begin{columns}
-  \column{0.55\textwidth}
-  \centering
-  \includegraphics[width=\textwidth]{engine/dataflow.png}
-  \par\vspace{2pt}{\tiny Both Spark and Flink represent computation as a Directed Acyclic Graph (DAG)}
-
-  \column{0.42\textwidth}
-  \textbf{What is a Dataflow DAG?}
+  \textbf{3-Node KRaft Cluster}
   \begin{itemize}\small
-    \item \textbf{Directed} — data flows one way; no cycles
-    \item \textbf{Acyclic} — guarantees deterministic, terminating execution
-    \item \textbf{Graph} — \textbf{nodes} are operators (map, filter, join, aggregate); \textbf{edges} are data streams between them
-    \item Each operator processes records and passes results downstream
-    \item Operators at the same level run \textbf{in parallel} across partitions
-    \item Both Spark \& Flink compile your code into a DAG — they differ in \emph{when} and \emph{how} they execute it
+    \item Runs on \textbf{apache/kafka:4.3.0} — no Zookeeper
+    \item Each node is both broker \& controller
+    \item \textbf{Replication factor 3}, min ISR 2 — no data loss if one broker restarts
   \end{itemize}
+  \vspace{0.3cm}
+  \textbf{Topic Configuration}
+  \begin{itemize}\small
+    \item 3 topics: \texttt{listen\_events}, \texttt{page\_view\_events}, \texttt{auth\_events}
+    \item \textbf{3 partitions} per topic — enables parallel consumption by Flink
+    \item Topics pre-created by \texttt{kafka-init} before producers start
+  \end{itemize}
+
+  \column{0.48\textwidth}
+  \begin{tikzpicture}[node distance=0.45cm and 0.3cm, every node/.style={font=\tiny}]
+    % Producer
+    \node[draw, fill=BKTemplate!20, rounded corners, minimum width=4.0cm, align=center, font=\small] (ev) {Eventsim (producer)};
+
+    % Brokers — each holds one partition leader
+    \node[draw, fill=BKTemplate!15, rounded corners, minimum width=1.15cm, minimum height=1.0cm, align=center,
+      below left=0.6cm and 0.85cm of ev] (b1) {broker-1\\[2pt]\textbf{P0} leader\\P1 replica\\P2 replica};
+    \node[draw, fill=BKTemplate!15, rounded corners, minimum width=1.15cm, minimum height=1.0cm, align=center,
+      below=0.6cm of ev] (b2) {broker-2\\[2pt]P0 replica\\\textbf{P1} leader\\P2 replica};
+    \node[draw, fill=BKTemplate!15, rounded corners, minimum width=1.15cm, minimum height=1.0cm, align=center,
+      below right=0.6cm and 0.85cm of ev] (b3) {broker-3\\[2pt]P0 replica\\P1 replica\\\textbf{P2} leader};
+
+    % Flink consumers
+    \node[draw, fill=BKTemplate!15, rounded corners, minimum width=1.15cm, align=center,
+      below=0.5cm of b1] (tm1) {TM-1\\reads P0};
+    \node[draw, fill=BKTemplate!15, rounded corners, minimum width=1.15cm, align=center,
+      below=0.5cm of b2] (tm2) {TM-2\\reads P1};
+    \node[draw, fill=BKTemplate!15, rounded corners, minimum width=1.15cm, align=center,
+      below=0.5cm of b3] (tm3) {TM-3\\reads P2};
+
+    % Arrows: producer → each broker (writes to all for replication)
+    \draw[-{Stealth}] (ev) -- (b1);
+    \draw[-{Stealth}] (ev) -- (b2);
+    \draw[-{Stealth}] (ev) -- (b3);
+
+    % Arrows: each TM reads from its partition leader
+    \draw[-{Stealth}] (b1) -- (tm1);
+    \draw[-{Stealth}] (b2) -- (tm2);
+    \draw[-{Stealth}] (b3) -- (tm3);
+  \end{tikzpicture}
 \end{columns}
 \end{frame}
 
-% ── Frame 9: Apache Flink ────────────────────────────────────────────────────
+%=============================================================================
+\section{Stream Processing: Apache Flink}
+%=============================================================================
+
 \begin{frame}{Apache Flink: True Event Streaming}
 \begin{columns}
   \column{0.55\textwidth}
@@ -253,142 +281,86 @@
   \vspace{0.25cm}
   \textbf{Fault Tolerance}
   \begin{itemize}\small
-    \item Barrier checkpoints injected into streams like a conveyor belt
+    \item Barrier checkpoints injected into the stream
     \item \textbf{Exactly-once} with transactional sinks
-    \item State management can be store in heap or RockDB
-    \item Checkpoint is fully async, no pause in processing (local or cloud)
+    \item State stored in heap or RocksDB
+    \item Fully async — no pause in processing
   \end{itemize}
 \end{columns}
 \end{frame}
 
-
-% ── Frame 8: Apache Spark ────────────────────────────────────────────────────
-\begin{frame}{Apache Spark Structured Streaming}
-\begin{columns}
-  \column{0.55\textwidth}
-  \includegraphics[width=\textwidth]{engine/spark_micro_batch_latency.png}
-  % \par\vspace{1pt}{\tiny Micro-batch: stream as a sequence of small DataFrames}
-  % \vspace{0.15cm}
-
-  \includegraphics[width=\textwidth]{engine/spark_rtm.png}
-  % \par\vspace{1pt}{\tiny Real-time Mode (Spark 4): concurrent stages, streaming shuffle}
-
-  \column{0.42\textwidth}
-  \textbf{Micro-batch (default)}
-  \begin{itemize}\small
-    \item Latency: \textbf{100 ms – seconds}
-    \item Still depend on exist batch mode stage, plan create a lot of latency
-    \item State management In-memory+WAL or RocksDB
-    \item Checkpoint sync write to checkpoint location (local or cloud) create latency
-  \end{itemize}
-  \vspace{0.25cm}
-  \textbf{Real-time Mode (Spark 4)}
-  \begin{itemize}\small
-    \item Inherit from micro-batch, but update \textbf{concurrent stages} and \textbf{longer duration micro-batches}
-    \item Mitigate the latency of micro-batch in planning phase and sequential stages
-    \item Latency: \textbf{sub-100 ms}
-  \end{itemize}
-  \vspace{0.2cm}
-\end{columns}
-\end{frame}
-
-
-% ── Frame 10: Spark vs Flink ─────────────────────────────────────────────────
-\begin{frame}{Spark vs.\ Flink: Side-by-Side}
-\centering
-\begin{tabularx}{\textwidth}{lXX}
-  \toprule
-  \textbf{Dimension}  & \textbf{Apache Spark}                            & \textbf{Apache Flink} \\
-  \midrule
-  Execution model     & Micro-batch (scheduled triggers); Real-time Mode (Spark 4) & True record-at-a-time streaming \\
-  Latency             & 100 ms–s (micro-batch); sub-100 ms (RTM)         & 1–10 ms \\
-  State management    & In-memory / RocksDB (Spark 3.2+); managed per trigger & RocksDB or heap; always-live, keyed state \\
-  Checkpoint          & WAL per micro-batch                              & Async Chandy-Lamport barriers; incremental snapshots \\
-  Use case            & Unified batch + streaming                        & Low-latency, stateful, CEP, event-time joins \\
-  \bottomrule
-\end{tabularx}
-\vspace{0.3cm}
-\end{frame}
-
-%=============================================================================
-\section{Application: Streamify Pipeline}
-%=============================================================================
-
-% ── Frame 11: Why Streamify? ─────────────────────────────────────────────────
-\begin{frame}{Why Streamify?}
-\begin{columns}
-  \column{0.50\textwidth}
-  \textbf{The Use Case}
-  \begin{itemize}\small
-    \item Music streaming platforms generate \textbf{continuous, high-velocity events} — every play, skip, pause, and login is an event
-    \item Users expect \textbf{live charts} and real-time fraud detection — batch pipelines cannot deliver this
-    \item A realistic domain to validate all theoretical concepts end-to-end
-  \end{itemize}
-  \vspace{0.15cm}
-  \textbf{3 Event Types Simulated}
-  \begin{itemize}\small
-    \item \texttt{listen\_events} — song plays, skips, durations
-    \item \texttt{page\_view\_events} — user navigation behaviour
-    \item \texttt{auth\_events} — logins, session starts/ends
-  \end{itemize}
-
-  \column{0.47\textwidth}
-  \textbf{What Streamify Validates}
-  \begin{itemize}\small
-    \item \textbf{Kafka} — durable, decoupled event bus between producer and all downstream consumers
-    \item \textbf{PyFlink} — low-latency, exactly-once ingestion into Snowflake
-    \item \textbf{dbt} — transforms raw staging data into an analytics-ready star schema
-    \item \textbf{Airflow} — orchestrates transformation runs reliably
-    \item \textbf{Power BI} — surfaces live insights from a pre-joined wide view
-  \end{itemize}
-\end{columns}
-\end{frame}
-
-% ── Frame 12: Architecture Overview ──────────────────────────────────────────
-\begin{frame}{Streamify: End-to-End Architecture}
-\centering
-\includegraphics[width=0.80\textwidth]{app/overview.png}
-\end{frame}
-
-% ── Frame 12: Pipeline + Modeling ────────────────────────────────────────────
-\begin{frame}{Pipeline: Ingest → Process → Model → Serve}
+\begin{frame}{Flink Setup in Streamify}
 \begin{columns}
   \column{0.48\textwidth}
-  \textbf{Real-time Ingestion}
+  \textbf{Scaled Deployment}
   \begin{itemize}\small
-    \item \textbf{Eventsim} — generates 3 Kafka topics:\\
-          \texttt{listen\_events}, \texttt{page\_view\_events}, \texttt{auth\_events}
-    \item \textbf{Kafka} — durable, partitioned transport
-    \item \textbf{PyFlink} — parses JSON, enriches timestamps,\\
-          writes to Snowflake via JDBC (exactly-once)
+    \item \textbf{1 JobManager} — coordinates job scheduling and checkpoints
+    \item \textbf{3 TaskManagers} — each handles one partition of each topic in parallel
+    \item \textbf{Parallelism 3} — matches 3 Kafka partitions exactly
+    \item Slot sharing: one full pipeline per TaskManager
   \end{itemize}
   \vspace{0.3cm}
-  \textbf{Transformation \& Orchestration}
+  \textbf{PyFlink Pipeline}
   \begin{itemize}\small
-    \item \textbf{dbt} — builds star schema inside Snowflake\\
-          (fact\_streams + 5 dim tables + wide\_streams view)
-    \item \textbf{Airflow} — schedules dbt run via DockerOperator
+    \item Source: Kafka SQL connector (3 topics)
+    \item Transform: Python UDF — JSON decode, timestamp enrichment
+    \item Sink: Snowflake via JDBC (exactly-once)
+    \item Checkpointing every \textbf{10 seconds} — commits offsets back to Kafka
   \end{itemize}
 
   \column{0.48\textwidth}
-  \centering
-  \begin{tikzpicture}[node distance=0.55cm, every node/.style={font=\small}]
-    \node[draw, fill=BKTemplate!15, rounded corners, minimum width=3.2cm, align=center] (ev) {Eventsim};
-    \node[draw, fill=BKTemplate!25, rounded corners, minimum width=3.2cm, align=center, below=of ev] (kf) {Apache Kafka};
-    \node[draw, fill=BKTemplate!35, rounded corners, minimum width=3.2cm, align=center, below=of kf] (fl) {Apache Flink (PyFlink)};
-    \node[draw, fill=BKTemplate!45, rounded corners, minimum width=3.2cm, align=center, below=of fl] (sf) {Snowflake (STAGING)};
-    \node[draw, fill=BKTemplate!55, rounded corners, minimum width=3.2cm, align=center, below=of sf] (dbt) {dbt (transformation)};
-    \node[draw, fill=BKTemplate!65, rounded corners, minimum width=3.2cm, align=center, below=of dbt] (bi) {Dashboard};
-    \draw[-{Stealth}] (ev) -- (kf);
-    \draw[-{Stealth}] (kf) -- (fl);
-    \draw[-{Stealth}] (fl) -- (sf);
-    \draw[-{Stealth}] (sf) -- (dbt);
-    \draw[-{Stealth}] (dbt) -- (bi);
-  \end{tikzpicture}
+  \includegraphics[width=\textwidth]{engine/flink_architecture.png}
 \end{columns}
 \end{frame}
 
-% ── Frame 13: Dashboard ───────────────────────────────────────────────────────
+%=============================================================================
+\section{Data Warehouse \& Dashboard}
+%=============================================================================
+
+\begin{frame}{Warehouse: Landing Zone $\to$ Gold}
+\begin{columns}
+  \column{0.48\textwidth}
+  \centering
+  \begin{tikzpicture}[node distance=0.5cm, every node/.style={font=\small}]
+    \node[draw, fill=gray!15, rounded corners, minimum width=4.2cm, align=center] (lz)
+      {\textbf{Landing Zone}\\\tiny Raw JSON from Flink via JDBC};
+    \node[draw, fill=orange!20, rounded corners, minimum width=4.2cm, align=center, below=of lz] (br)
+      {\textbf{Bronze}\\\tiny Deduplicated raw records};
+    \node[draw, fill=blue!15, rounded corners, minimum width=4.2cm, align=center, below=of br] (si)
+      {\textbf{Silver}\\\tiny Dimension tables + Fact table};
+    \node[draw, fill=yellow!25, rounded corners, minimum width=4.2cm, align=center, below=of si] (go)
+      {\textbf{Gold}\\\tiny Wide table — pre-joined for BI};
+    \draw[-{Stealth}] (lz) -- (br);
+    \draw[-{Stealth}] (br) -- (si);
+    \draw[-{Stealth}] (si) -- (go);
+  \end{tikzpicture}
+
+  \column{0.48\textwidth}
+  \textbf{Landing Zone}
+  \begin{itemize}\small
+    \item Raw events written directly by Flink — no transformation
+  \end{itemize}
+  \vspace{0.15cm}
+  \textbf{Bronze — Deduplication}
+  \begin{itemize}\small
+    \item Remove duplicate events using event ID and timestamp
+  \end{itemize}
+  \vspace{0.15cm}
+  \textbf{Silver — Star Schema}
+  \begin{itemize}\small
+    \item \texttt{fact\_streams} central fact table
+    \item 5 dimension tables: users, songs, artists, locations, datetime
+  \end{itemize}
+  \vspace{0.15cm}
+  \textbf{Gold — Wide Table}
+  \begin{itemize}\small
+    \item \texttt{wide\_streams}: pre-joins fact + all dims
+    \item Single flat table for Power BI — no runtime JOINs
+  \end{itemize}
+\end{columns}
+\end{frame}
+
+
 \begin{frame}{Dashboard: Real-time Insights}
 \begin{columns}
   \column{0.65\textwidth}
@@ -396,37 +368,102 @@
 
   \column{0.33\textwidth}
   \textbf{Key Metrics}
-  \begin{itemize}
-    \item Top artists by play count
-    \item Songs played over time (hourly)
-    \item Geographic distribution (US map)
-    \item Free vs.\ paid listener split
+  \begin{itemize}\small
+    \item \textbf{Top artists} by total play count
+    \item \textbf{Songs played over time} — hourly trend
+    \item \textbf{Geographic distribution} — listener locations (US map)
+    \item \textbf{Free vs.\ paid} listener split
+    \item \textbf{Session activity} — active users over time
   \end{itemize}
 \end{columns}
 \end{frame}
 
 %=============================================================================
+\section{Monitoring}
+%=============================================================================
+
+\begin{frame}{Monitoring: How It Fits Together}
+\begin{center}
+\begin{tikzpicture}[node distance=0.6cm and 1.2cm, every node/.style={font=\small}]
+  \node[draw, fill=BKTemplate!20, rounded corners, minimum width=2.8cm, align=center] (kf) {Apache Kafka\\(3 brokers)};
+  \node[draw, fill=BKTemplate!20, rounded corners, minimum width=2.8cm, align=center, right=1.4cm of kf] (fl) {Apache Flink\\(3 TaskManagers)};
+
+  \node[draw, fill=orange!20, rounded corners, minimum width=2.8cm, align=center, below=of kf] (ke) {kafka-exporter\\port 9308};
+  \node[draw, fill=orange!20, rounded corners, minimum width=2.8cm, align=center, below=of fl] (fp) {Flink Prometheus\\reporter port 9249};
+
+  \node[draw, fill=blue!15, rounded corners, minimum width=2.8cm, align=center, below right=0.6cm and -0.7cm of ke] (pr) {Prometheus\\(scrapes every 15s)};
+
+  \node[draw, fill=green!15, rounded corners, minimum width=2.8cm, align=center, below=of pr] (gr) {Grafana\\(3 dashboards)};
+
+  \draw[-{Stealth}] (kf) -- (ke);
+  \draw[-{Stealth}] (fl) -- (fp);
+  \draw[-{Stealth}] (ke) -- (pr);
+  \draw[-{Stealth}] (fp) -- (pr);
+  \draw[-{Stealth}] (pr) -- (gr);
+\end{tikzpicture}
+\end{center}
+\end{frame}
+
+\begin{frame}{Monitoring Stack: Prometheus \& Grafana}
+\begin{columns}
+  \column{0.48\textwidth}
+  \textbf{Why Monitor?}
+  \begin{itemize}\small
+    \item Verify Flink throughtput matches Kafka ingestion rate
+    \item Detect consumer-group lag
+    \item Track CPU and memory anomalies across all 3 TaskManagers and the JobManager
+  \end{itemize}
+
+  \textbf{Components}
+  \begin{itemize}\small
+    \item \textbf{Flink Prometheus Reporter} — exposes JVM and operator metrics on port 9249
+    \item \textbf{kafka-exporter} — exposes consumer-group lag on port 9308
+    \item \textbf{Prometheus} — scrapes both; stores time-series data
+    \item \textbf{Grafana} — visualises with 3 pre-built dashboards
+  \end{itemize}
+
+  \column{0.48\textwidth}
+  \textbf{3 Grafana Dashboards}
+  \vspace{0.2cm}
+
+  \begin{block}{Kafka Lag}
+    \small Consumer-group lag per topic + consumption rate (msgs/s) — detects if Flink is falling behind
+  \end{block}
+
+  \begin{block}{Flink Record Processing}
+    \small Records ingested per second per source operator — confirms data is flowing through the pipeline
+  \end{block}
+
+  \begin{block}{Flink CPU / Memory}
+    \small Per-TaskManager JVM CPU load, heap usage, and managed memory — identifies resource pressure
+  \end{block}
+\end{columns}
+\end{frame}
+
+
+
+%=============================================================================
 \section{Conclusion}
 %=============================================================================
 
-% ── Frame 14: Conclusion ──────────────────────────────────────────────────────
 \begin{frame}{Conclusion}
 \textbf{Key Takeaways}
-\begin{enumerate}
-  \item \textbf{Kafka} decouples producers from consumers — swap the processing engine without touching the rest of the pipeline
-  \item \textbf{Flink} delivers sub-10 ms latency, native event-time semantics, and exactly-once guarantees — outperforming Spark for stateful real-time workloads
-  \item \textbf{ELT pattern} keeps concerns separate: Flink loads raw events, dbt transforms inside Snowflake, Airflow orchestrates
+\begin{enumerate}\setlength\itemsep{4pt}
+  \item \textbf{Kafka} decouples producers from consumers — 3-node KRaft cluster with 3 partitions per topic enables fault tolerance and parallel consumption
+  \item \textbf{Flink} delivers sub-10 ms latency with exactly-once guarantees — 3 TaskManagers at parallelism 3 match Kafka partitions for maximum throughput
+  \item \textbf{ELT pattern} keeps concerns separate: Flink loads raw events, dbt transforms inside Snowflake through landing $\to$ bronze $\to$ silver $\to$ gold layers
+  \item \textbf{Observability} closes the loop — Prometheus \& Grafana confirm the pipeline is healthy in real time
 \end{enumerate}
 
+\vspace{0.3cm}
 \textbf{Future Directions}
 \begin{itemize}
-  \item \textbf{Cloud} — migrate to Kinesis + Confluent Cloud
-  \item \textbf{Schema evolution} — Confluent Schema Registry + Avro
+  \item Migrate to cloud — Confluent Cloud + Kinesis + Snowflake Snowpipe
+  \item Add schema evolution with Confluent Schema Registry + Avro
 \end{itemize}
-
 \end{frame}
 
-% ── Frame 15: The End ─────────────────────────────────────────────────────────
+% ── The End ───────────────────────────────────────────────────────────────────
 \setbeamertemplate{footline}{}
 \begin{frame}
   \centering
