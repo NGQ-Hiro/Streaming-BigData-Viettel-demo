@@ -298,12 +298,13 @@
     \item Latency: \textbf{100 ms – seconds}
     \item Still depend on exist batch mode stage, plan create a lot of latency
     \item State management In-memory+WAL or RocksDB
-    \item Checkpoint sync write to checkpoint location (local or cloud)
+    \item Checkpoint sync write to checkpoint location (local or cloud) create latency
   \end{itemize}
   \vspace{0.25cm}
   \textbf{Real-time Mode (Spark 4)}
   \begin{itemize}\small
     \item Inherit from micro-batch, but update \textbf{concurrent stages} and \textbf{longer duration micro-batches}
+    \item Mitigate the latency of micro-batch in planning phase and sequential stages
     \item Latency: \textbf{sub-100 ms}
   \end{itemize}
   \vspace{0.2cm}
@@ -321,7 +322,7 @@
   Execution model     & Micro-batch (scheduled triggers); Real-time Mode (Spark 4) & True record-at-a-time streaming \\
   Latency             & 100 ms–s (micro-batch); sub-100 ms (RTM)         & 1–10 ms \\
   State management    & In-memory / RocksDB (Spark 3.2+); managed per trigger & RocksDB or heap; always-live, keyed state \\
-  Checkpoint          & WAL per micro-batch; idempotent sink for EO      & Async Chandy-Lamport barriers; incremental snapshots \\
+  Checkpoint          & WAL per micro-batch                              & Async Chandy-Lamport barriers; incremental snapshots \\
   Use case            & Unified batch + streaming; ML pipelines          & Low-latency, stateful, CEP, event-time joins \\
   \bottomrule
 \end{tabularx}
@@ -365,7 +366,7 @@
     \node[draw, fill=BKTemplate!25, rounded corners, minimum width=3.2cm, align=center, below=of ev] (kf) {Apache Kafka};
     \node[draw, fill=BKTemplate!35, rounded corners, minimum width=3.2cm, align=center, below=of kf] (fl) {Apache Flink (PyFlink)};
     \node[draw, fill=BKTemplate!45, rounded corners, minimum width=3.2cm, align=center, below=of fl] (sf) {Snowflake (STAGING)};
-    \node[draw, fill=BKTemplate!55, rounded corners, minimum width=3.2cm, align=center, below=of sf] (dbt) {dbt (Star Schema)};
+    \node[draw, fill=BKTemplate!55, rounded corners, minimum width=3.2cm, align=center, below=of sf] (dbt) {dbt (transformation)};
     \node[draw, fill=BKTemplate!65, rounded corners, minimum width=3.2cm, align=center, below=of dbt] (bi) {Dashboard};
     \draw[-{Stealth}] (ev) -- (kf);
     \draw[-{Stealth}] (kf) -- (fl);
@@ -390,8 +391,6 @@
     \item Geographic distribution (US map)
     \item Free vs.\ paid listener split
   \end{itemize}
-  \vspace{0.4cm}
-  \small Connected to \texttt{wide\_streams} view — pre-joined, no DAX joins needed
 \end{columns}
 \end{frame}
 
