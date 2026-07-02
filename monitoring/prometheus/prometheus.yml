@@ -14,14 +14,22 @@ scrape_configs:
 
   # Flink JVM (CPU/memory) and per-operator record throughput. The
   # PrometheusReporter serves metrics on 9249 in each Flink container.
-  - job_name: flink
+  - job_name: flink-jobmanager
     static_configs:
       - targets: ['flink-jobmanager:9249']
         labels:
           role: jobmanager
-      - targets: ['flink-taskmanager:9249']
-        labels:
-          role: taskmanager
+
+  # TaskManagers run as multiple replicas sharing one service name, so use DNS
+  # A-record discovery to scrape every replica (a static target catches only one).
+  - job_name: flink-taskmanager
+    dns_sd_configs:
+      - names: ['flink-taskmanager']
+        type: A
+        port: 9249
+    relabel_configs:
+      - target_label: role
+        replacement: taskmanager
 
   # Per-container CPU / memory / disk from cAdvisor.
   - job_name: cadvisor

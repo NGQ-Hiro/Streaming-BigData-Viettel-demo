@@ -31,7 +31,7 @@
       "description": "Records emitted per second by the Kafka source operators (task-level counters read 0 here because each Source->UDF->Sink pipeline is chained into one task).",
       "gridPos": { "h": 6, "w": 18, "x": 6, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "short", "displayName": "records/s" }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
@@ -47,7 +47,7 @@
       "title": "Records ingested/s by source topic",
       "gridPos": { "h": 9, "w": 24, "x": 0, "y": 6 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "axisSoftMin": 0 } }, "overrides": [] },
       "targets": [
         {
           "refId": "A",
