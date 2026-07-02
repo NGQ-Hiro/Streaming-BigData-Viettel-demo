@@ -7,6 +7,7 @@
 \usecolortheme[named=BKTemplate]{structure}
 \setbeamercolor{title}{fg=BKTemplate,bg=}
 \setbeamertemplate{caption}[numbered]
+\setbeamertemplate{navigation symbols}{}
 
 \usepackage{url}
 \usepackage{booktabs}
@@ -28,10 +29,8 @@
 \usepackage{amsmath}
 \usepackage{dsfont}
 \usepackage{tabularx}
-\usepackage[style=authortitle,backend=bibtex]{biblatex}
-\addbibresource{thesiscite.bib}
 
-\graphicspath{{images/}{../latext/image/}{../image/}}
+\graphicspath{{images/}}
 
 \renewcommand{\footnotesize}{\tiny}
 \newcommand{\mathbi}[1]{\boldsymbol{#1}}
@@ -67,7 +66,7 @@
 
 % ── Title page ────────────────────────────────────────────────────────────────
 \setbeamertemplate{background canvas}{
-  \includegraphics[width=\paperwidth,height=\paperheight]{images/FrontBackground.pdf}
+  \includegraphics[width=\paperwidth,height=\paperheight]{images/FrontBackgroundvtt.png}
 }
 \begin{frame}[plain]
 \titlepage
@@ -75,7 +74,7 @@
 
 % ── Background for all remaining pages ────────────────────────────────────────
 \setbeamertemplate{background canvas}{
-  \includegraphics[width=\paperwidth,height=\paperheight]{images/Background.pdf}
+  \includegraphics[width=\paperwidth,height=\paperheight]{images/Backgroundvtt.png}
 }
 
 % Frame 2 --- Table of Contents
@@ -356,17 +355,17 @@ A music streaming platform generates \textbf{3 real-time event types}:
 \begin{frame}
 \frametitle{Streamify: End-to-End Architecture}
 \centering
-\includegraphics[width=0.88\textwidth]{overview.png}
+\includegraphics[width=0.75\textwidth]{app/overview.png}
 \vspace{0.15cm}
 
-\begin{columns}
-  \column{0.14\textwidth}\centering\tiny\textbf{Eventsim}\\Event gen
-  \column{0.14\textwidth}\centering\tiny\textbf{Kafka}\\Transport
-  \column{0.14\textwidth}\centering\tiny\textbf{PyFlink}\\Processing
-  \column{0.14\textwidth}\centering\tiny\textbf{Snowflake}\\Warehouse
-  \column{0.14\textwidth}\centering\tiny\textbf{dbt + Airflow}\\Transform \& Orchestrate
-  \column{0.14\textwidth}\centering\tiny\textbf{Power BI}\\Dashboard
-\end{columns}
+% \begin{columns}
+%   \column{0.14\textwidth}\centering\tiny\textbf{Eventsim}\\Event gen
+%   \column{0.14\textwidth}\centering\tiny\textbf{Kafka}\\Transport
+%   \column{0.14\textwidth}\centering\tiny\textbf{PyFlink}\\Processing
+%   \column{0.14\textwidth}\centering\tiny\textbf{Snowflake}\\Warehouse
+%   \column{0.14\textwidth}\centering\tiny\textbf{dbt + Airflow}\\Transform \& Orchestrate
+%   \column{0.14\textwidth}\centering\tiny\textbf{Power BI}\\Dashboard
+% \end{columns}
 \end{frame}
 
 % Frame 18 --- Pipeline
@@ -449,7 +448,7 @@ A music streaming platform generates \textbf{3 real-time event types}:
 \frametitle{Power BI Dashboard}
 \begin{columns}
   \column{0.65\textwidth}
-  \includegraphics[width=\textwidth]{dashboard.png}
+  \includegraphics[width=\textwidth]{app/dashboard.png}
   \column{0.33\textwidth}
   \textbf{Key metrics:}
   \begin{itemize}\small
@@ -460,12 +459,12 @@ A music streaming platform generates \textbf{3 real-time event types}:
     \item Session activity \& auth rates
   \end{itemize}
   \vspace{0.3cm}
-  \textbf{Evaluation:}
-  \begin{itemize}\small
-    \item \textbf{Fault tolerance}: killed TaskManager --- recovered with zero data loss
-    \item \textbf{Exactly-once}: no duplicates in Snowflake across restarts
-    \item \textbf{dbt}: star schema refreshed daily by Airflow
-  \end{itemize}
+  % \textbf{Evaluation:}
+  % \begin{itemize}\small
+  %   \item \textbf{Fault tolerance}: killed TaskManager --- recovered with zero data loss
+  %   \item \textbf{Exactly-once}: no duplicates in Snowflake across restarts
+  %   \item \textbf{dbt}: star schema refreshed daily by Airflow
+  % \end{itemize}
 \end{columns}
 \end{frame}
 
