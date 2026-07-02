@@ -70,7 +70,7 @@
 
 % ── Section progress slide at the start of each section ───────────────────────
 \AtBeginSection[]{
-  \begin{frame}{Agenda}
+  \begin{frame}{Table of Contents}
     \tableofcontents[currentsection, sectionstyle=show/shaded, subsectionstyle=show/show/shaded]
   \end{frame}
 }
@@ -134,7 +134,6 @@
   \textbf{In Scope}
   \begin{itemize}\small
     \item Kafka → Flink → Snowflake pipeline
-    \item Kafka: ZooKeeper → KRaft evolution
     \item Spark micro-batch vs Flink true-streaming
     \item dbt star schema + Airflow scheduling
     \item Local Docker Compose deployment
@@ -208,7 +207,7 @@
     \begin{itemize}
       \item Collect → store → process in bulk
       \item Latency: \textbf{hours to days}
-      \item Tools: Hadoop, scheduled SQL
+      \item Tools: Hadoop, Spark, scheduled SQL
     \end{itemize}
   \end{block}
   \vspace{0.3cm}
@@ -226,39 +225,29 @@
     \item \textbf{Unbounded data} — stream never ends; state must be bounded
     \item \textbf{Out-of-order events} — need watermarks to handle late arrivals
     \item \textbf{Fault tolerance} — recover without loss or duplicates; exactly-once semantics
+    \item \textbf{State Management} — large state must be checkpointed to durable storage (e.g., local, cloud)
   \end{enumerate}
-\end{columns}
+  \end{columns}
 \end{frame}
 
-% ── Frame 8: Apache Spark ────────────────────────────────────────────────────
-\begin{frame}{Apache Spark Structured Streaming}
+% ── Frame 8b: DAG-based Dataflow ─────────────────────────────────────────────
+\begin{frame}{DAG-based Dataflow: Shared Foundation}
 \begin{columns}
   \column{0.55\textwidth}
-  \includegraphics[width=\textwidth]{engine/spark_micro_batch.png}
-  \par\vspace{1pt}{\tiny Micro-batch: stream as a sequence of small DataFrames}
-  \vspace{0.15cm}
-
-  \includegraphics[width=\textwidth]{engine/spark_rtm.png}
-  \par\vspace{1pt}{\tiny Real-time Mode (Spark 4): concurrent stages, streaming shuffle}
+  \centering
+  \includegraphics[width=\textwidth]{engine/dataflow.png}
+  \par\vspace{2pt}{\tiny Both Spark and Flink represent computation as a Directed Acyclic Graph (DAG)}
 
   \column{0.42\textwidth}
-  \textbf{Micro-batch (default)}
+  \textbf{What is a Dataflow DAG?}
   \begin{itemize}\small
-    \item Trigger interval (e.g.\ 1 s)
-    \item Latency: \textbf{100 ms – seconds}
-    \item Exactly-once with idempotent sinks
-    \item Full stateful operators
+    \item \textbf{Directed} — data flows one way; no cycles
+    \item \textbf{Acyclic} — guarantees deterministic, terminating execution
+    \item \textbf{Graph} — \textbf{nodes} are operators (map, filter, join, aggregate); \textbf{edges} are data streams between them
+    \item Each operator processes records and passes results downstream
+    \item Operators at the same level run \textbf{in parallel} across partitions
+    \item Both Spark \& Flink compile your code into a DAG — they differ in \emph{when} and \emph{how} they execute it
   \end{itemize}
-  \vspace{0.25cm}
-  \textbf{Real-time Mode (Spark 4)}
-  \begin{itemize}\small
-    \item Concurrent stages + streaming shuffle
-    \item Latency: \textbf{sub-100 ms}
-    \item Exactly-once maintained
-    \item Currently in public preview
-  \end{itemize}
-  \vspace{0.2cm}
-  \small\textit{Unified API — same code for batch \& streaming}
 \end{columns}
 \end{frame}
 
@@ -283,32 +272,60 @@
   \vspace{0.25cm}
   \textbf{Fault Tolerance}
   \begin{itemize}\small
-    \item Barrier checkpoints; state in RocksDB
-    \item Recover from last complete checkpoint
+    \item Barrier checkpoints injected into streams like a conveyor belt
     \item \textbf{Exactly-once} with transactional sinks
+    \item State management can be store in heap or RockDB
+    \item Checkpoint is fully async, no pause in processing (local or cloud)
   \end{itemize}
-  \vspace{0.2cm}
-  \textbf{APIs:} DataStream, Table API, Flink SQL, \textbf{PyFlink}
 \end{columns}
 \end{frame}
+
+
+% ── Frame 8: Apache Spark ────────────────────────────────────────────────────
+\begin{frame}{Apache Spark Structured Streaming}
+\begin{columns}
+  \column{0.55\textwidth}
+  \includegraphics[width=\textwidth]{engine/spark_micro_batch_latency.png}
+  % \par\vspace{1pt}{\tiny Micro-batch: stream as a sequence of small DataFrames}
+  % \vspace{0.15cm}
+
+  \includegraphics[width=\textwidth]{engine/spark_rtm.png}
+  % \par\vspace{1pt}{\tiny Real-time Mode (Spark 4): concurrent stages, streaming shuffle}
+
+  \column{0.42\textwidth}
+  \textbf{Micro-batch (default)}
+  \begin{itemize}\small
+    \item Latency: \textbf{100 ms – seconds}
+    \item Still depend on exist batch mode stage, plan create a lot of latency
+    \item State management In-memory+WAL or RocksDB
+    \item Checkpoint sync write to checkpoint location (local or cloud)
+  \end{itemize}
+  \vspace{0.25cm}
+  \textbf{Real-time Mode (Spark 4)}
+  \begin{itemize}\small
+    \item Inherit from micro-batch, but update \textbf{concurrent stages} and \textbf{longer duration micro-batches}
+    \item Latency: \textbf{sub-100 ms}
+  \end{itemize}
+  \vspace{0.2cm}
+\end{columns}
+\end{frame}
+
 
 % ── Frame 10: Spark vs Flink ─────────────────────────────────────────────────
 \begin{frame}{Spark vs.\ Flink: Side-by-Side}
 \centering
 \begin{tabularx}{\textwidth}{lXX}
   \toprule
-  \textbf{Dimension}     & \textbf{Apache Spark}                        & \textbf{Apache Flink} \\
+  \textbf{Dimension}  & \textbf{Apache Spark}                            & \textbf{Apache Flink} \\
   \midrule
-  Execution model        & Micro-batch; Real-time Mode (Spark 4, preview) & True event-by-event streaming \\
-  Latency                & 100 ms–s (micro-batch); sub-100 ms (RTM)     & 1–10 ms \\
-  Fault tolerance        & WAL + idempotent sinks                       & Async barrier snapshotting \\
-  State backend          & In-memory / RocksDB (Spark 3.2+)             & RocksDB (incremental) / heap \\
-  Exactly-once           & Yes (micro-batch + idempotent sink)           & Yes (transactional sink) \\
-  Use case               & Unified batch + streaming; ML pipelines       & Low-latency, stateful, CEP \\
+  Execution model     & Micro-batch (scheduled triggers); Real-time Mode (Spark 4) & True record-at-a-time streaming \\
+  Latency             & 100 ms–s (micro-batch); sub-100 ms (RTM)         & 1–10 ms \\
+  State management    & In-memory / RocksDB (Spark 3.2+); managed per trigger & RocksDB or heap; always-live, keyed state \\
+  Checkpoint          & WAL per micro-batch; idempotent sink for EO      & Async Chandy-Lamport barriers; incremental snapshots \\
+  Use case            & Unified batch + streaming; ML pipelines          & Low-latency, stateful, CEP, event-time joins \\
   \bottomrule
 \end{tabularx}
 \vspace{0.3cm}
-\textbf{Why Flink for Streamify:} lower native latency, richer event-time semantics, and \texttt{StatementSet} runs 3 Kafka$\rightarrow$Snowflake pipelines as \textbf{one job} with one shared checkpoint.
 \end{frame}
 
 %=============================================================================
