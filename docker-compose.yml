@@ -8,7 +8,7 @@ x-flink-common: &flink-common
 # Apache Kafka 4.x runs KRaft-only (no Zookeeper). Shared image + common env
 # for the 3-node cluster; each broker overrides node id / listeners below.
 x-kafka-common: &kafka-common
-  image: apache/kafka:4.0.0
+  image: apache/kafka:4.3.0
   networks:
     - my-network
 
@@ -26,23 +26,23 @@ x-kafka-env: &kafka-env
   # Fixed cluster id so every node formats the same KRaft metadata log
   CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
 
-x-airflow-common: &airflow-common
-  image: apache/airflow:3.0.3
-  volumes:
-    # - ./airflow/dags:/opt/airflow/dags
-    # - ./airflow/logs:/opt/airflow/logs
-    # - ./airflow/jobs:/opt/airflow/jobs
-    # must create file and gain permission for docker 
-    # - ./airflow/simple_auth_manager_passwords.json.generated:/opt/airflow/simple_auth_manager_passwords.json.generated
-    - ./airflow:/opt/airflow
-    - /var/run/docker.sock:/var/run/docker.sock
+# x-airflow-common: &airflow-common
+#   image: apache/airflow:3.0.3
+#   volumes:
+#     # - ./airflow/dags:/opt/airflow/dags
+#     # - ./airflow/logs:/opt/airflow/logs
+#     # - ./airflow/jobs:/opt/airflow/jobs
+#     # must create file and gain permission for docker
+#     # - ./airflow/simple_auth_manager_passwords.json.generated:/opt/airflow/simple_auth_manager_passwords.json.generated
+#     - ./airflow:/opt/airflow
+#     - /var/run/docker.sock:/var/run/docker.sock
 
-  env_file:
-    - airflow.env
-  depends_on:
-    - postgres
-  networks:
-    - my-network
+#   env_file:
+#     - airflow.env
+#   depends_on:
+#     - postgres
+#   networks:
+#     - my-network
 
 services:
   broker-1:
@@ -81,43 +81,57 @@ services:
       KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9095'
       KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://broker-3:29092,PLAINTEXT_HOST://localhost:9095'
 
-  schema-registry:
-    image: confluentinc/cp-schema-registry:7.5.0
-    hostname: schema-registry
-    container_name: schema-registry
+  # Creates the event topics with 3 partitions (replication-factor 3) before any
+  # producer runs, so partitioning isn't left to broker auto-create defaults.
+  # Runs to completion, then exits.
+  kafka-init:
+    <<: *kafka-common
+    container_name: kafka-init
     depends_on:
       - broker-1
       - broker-2
       - broker-3
-    ports:
-      - "8081:8081"
-    environment:
-      SCHEMA_REGISTRY_HOST_NAME: schema-registry
-      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'broker-1:29092,broker-2:29092,broker-3:29092'
-      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
-    networks:
-      - my-network
+    restart: "no"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo "Waiting for Kafka to accept requests..."
+        until /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker-1:29092 --list >/dev/null 2>&1; do sleep 3; done
+        for t in listen_events page_view_events auth_events; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker-1:29092 \
+            --create --if-not-exists --topic "$$t" --partitions 3 --replication-factor 3
+          # If the topic already existed with fewer partitions, grow it to 3.
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker-1:29092 \
+            --alter --topic "$$t" --partitions 3 2>/dev/null || true
+        done
+        echo "Topics ready (3 partitions each):"
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker-1:29092 --describe | grep -E 'Topic:|PartitionCount'
 
-  control-center:
-    image: confluentinc/cp-enterprise-control-center:7.5.0
-    hostname: control-center
-    container_name: control-center
+  # Event generator. Auto-runs on `compose up` after the topics exist. Uses the
+  # container's (GNU) date to set start = now and end = now + 24h.
+  eventsim:
+    build: ./eventsim
+    image: eventsim:latest
+    container_name: eventsim
     depends_on:
-      - broker-1
-      - broker-2
-      - broker-3
-      - schema-registry
-    ports:
-      - "9021:9021"
-    environment:
-      CONTROL_CENTER_BOOTSTRAP_SERVERS: 'broker-1:29092,broker-2:29092,broker-3:29092'
-      CONTROL_CENTER_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
-      CONTROL_CENTER_REPLICATION_FACTOR: 3
-      CONTROL_CENTER_INTERNAL_TOPICS_PARTITIONS: 1
-      CONTROL_CENTER_MONITORING_INTERCEPTOR_TOPIC_PARTITIONS: 1
-      CONFLUENT_METRICS_TOPIC_REPLICATION: 3
-      CONFLUENT_METRICS_ENABLE: 'false'
-      PORT: 9021
+      kafka-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        START=$$(date -u +"%Y-%m-%dT%H:%M:%S")
+        END=$$(date -u -d "+24 hours" +"%Y-%m-%dT%H:%M:%S")
+        echo "Running eventsim with start=$$START end=$$END"
+        exec /opt/eventsim/eventsim.sh \
+          -c examples/example-config.json \
+          --continuous \
+          --start-time "$$START" \
+          --end-time "$$END" \
+          --nusers 200000 \
+          --growth-rate 10 \
+          --userid 1 \
+          --kafkaBrokerList broker-1:29092,broker-2:29092,broker-3:29092
     networks:
       - my-network
 
@@ -128,10 +142,13 @@ services:
     command: jobmanager
     ports:
       - "8083:8081"
+      - "9249:9249"
     environment:
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
         rest.port: 8081
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9249
 
   flink-taskmanager:
     <<: *flink-common
@@ -141,45 +158,160 @@ services:
       - flink-jobmanager
     deploy:
       replicas: 1
+    ports:
+      - "9250:9249"
     environment:
       FLINK_PROPERTIES: |
         jobmanager.rpc.address: flink-jobmanager
         taskmanager.numberOfTaskSlots: 4
-        taskmanager.memory.process.size: 1728m
+        taskmanager.memory.process.size: 3g
+        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
+        metrics.reporter.prom.port: 9249
 
-  # Submit the PyFlink job:
+  # One-shot job submitter: waits for a free task slot, then submits the
+  # PyFlink job detached so it survives after this container exits. Skips if a
+  # job is already RUNNING (avoids duplicates on repeated `compose up`).
+  flink-job-submitter:
+    <<: *flink-common
+    container_name: flink-job-submitter
+    depends_on:
+      - flink-jobmanager
+      - flink-taskmanager
+      - eventsim
+    restart: "no"
+    environment:
+      FLINK_DETACHED: "true"
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        JM=http://flink-jobmanager:8081
+        echo "Waiting for JobManager and >=3 free task slots (parallelism 3)..."
+        while true; do
+          SLOTS=$$(wget -qO- "$$JM/overview" 2>/dev/null | sed -n 's/.*"slots-available":\([0-9]*\).*/\1/p')
+          [ "$${SLOTS:-0}" -ge 3 ] 2>/dev/null && break
+          sleep 3
+        done
+        if wget -qO- "$$JM/jobs/overview" 2>/dev/null | grep -q '"state":"RUNNING"'; then
+          echo "A Flink job is already RUNNING; skipping submit."
+          exit 0
+        fi
+        echo "Submitting stream_events.py (detached)..."
+        flink run -d -m flink-jobmanager:8081 -py /opt/flink/jobs/stream_events.py
+        echo "Job submitted."
+
+  # Manual alternative:
   # docker exec -it flink-jobmanager flink run -py /opt/flink/jobs/stream_events.py
 
-  postgres:
-    image: postgres:14.18
+  # postgres:
+  #   image: postgres:14.18
+  #   ports:
+  #     - 5000:5432
+  #   environment:
+  #     POSTGRES_DB: airflow_db
+  #     POSTGRES_USER: airflow
+  #     POSTGRES_PASSWORD: airflow
+  #   volumes:
+  #     - ./postgres/data:/var/lib/postgresql/data
+  #   networks:
+  #     - my-network
+
+  # airflow-scheduler:
+  #   <<: *airflow-common
+  #   command: bash -c "airflow db migrate && airflow scheduler"
+
+  # airflow-webserver:
+  #   <<: *airflow-common
+  #   command: api-server
+  #   ports:
+  #     - 8000:8080
+  #   depends_on:
+  #     - airflow-scheduler
+
+  # airflow-dag-processor:
+  #   <<: *airflow-common
+  #   command: airflow dag-processor
+  #   depends_on:
+  #     - airflow-scheduler
+
+  # --- Monitoring stack -------------------------------------------------------
+
+  # Exposes Kafka consumer-group lag (and broker/topic metrics) to Prometheus
+  # on :9308. Talks to the KRaft brokers over the internal listener.
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.7.0
+    hostname: kafka-exporter
+    container_name: kafka-exporter
+    command:
+      - '--kafka.server=broker-1:29092'
+      - '--kafka.server=broker-2:29092'
+      - '--kafka.server=broker-3:29092'
     ports:
-      - 5000:5432
-    environment:
-      POSTGRES_DB: airflow_db
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
-    volumes:
-      - ./postgres/data:/var/lib/postgresql/data
+      - "9308:9308"
+    depends_on:
+      - broker-1
+      - broker-2
+      - broker-3
     networks:
       - my-network
 
-  airflow-scheduler:
-    <<: *airflow-common
-    command: bash -c "airflow db migrate && airflow scheduler"
-
-  airflow-webserver:
-    <<: *airflow-common
-    command: api-server
+  # Per-container CPU / memory / disk (filesystem + I/O) metrics on :8080,
+  # covering the Flink job/task managers and everything else in the stack.
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    hostname: cadvisor
+    container_name: cadvisor
+    privileged: true
     ports:
-      - 8000:8080
-    depends_on:
-      - airflow-scheduler
+      - "8085:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - my-network
 
-  airflow-dag-processor:
-    <<: *airflow-common
-    command: airflow dag-processor
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    hostname: prometheus
+    container_name: prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
     depends_on:
-      - airflow-scheduler
+      - kafka-exporter
+      - cadvisor
+      - flink-jobmanager
+    networks:
+      - my-network
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    hostname: grafana
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - my-network
 
 networks:
   my-network:
+
+volumes:
+  prometheus-data:
+  grafana-data:

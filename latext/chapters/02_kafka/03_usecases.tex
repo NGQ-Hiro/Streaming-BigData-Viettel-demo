@@ -1,6 +1,8 @@
 \section{Use Cases}
 
-% TODO: List the canonical Kafka use cases with a brief explanation of each.
+Apache Kafka has become the de facto standard event backbone across a wide range of industries.
+Table~\ref{tab:kafka-usecases} summarises the canonical use cases; the subsections below explain
+each pattern in more detail.
 
 \begin{table}[H]
   \centering
@@ -20,3 +22,81 @@
     \bottomrule
   \end{tabularx}
 \end{table}
+
+\subsection{Real-time Event Streaming}
+
+High-velocity event streams — user click sequences on an e-commerce site, GPS pings from a
+fleet of vehicles, sensor readings from industrial IoT devices — are a natural fit for Kafka.
+Events are published by producers (edge devices, application servers, SDKs) and consumed by one
+or more independent processing engines (Flink, Spark, or custom consumers) with millisecond ingestion latency.
+A key advantage over direct HTTP calls is \textbf{durability}: if the downstream processor
+restarts or falls behind, it replays events from its last committed offset rather than losing them.
+This pattern is the one used in Streamify, where Eventsim publishes music events to three Kafka
+topics and PyFlink consumes them for real-time processing.
+
+\subsection{Microservice Messaging}
+
+In a synchronous microservice architecture, service A calls service B's REST API directly.
+When service B is slow or unavailable, service A blocks or drops the request.
+Kafka replaces this point-to-point call with a shared topic: service A publishes an event and
+returns immediately; service B (and any other subscriber) processes it asynchronously at its own pace.
+This \textbf{temporal decoupling} eliminates cascading failures and allows services to be deployed,
+scaled, or replaced independently.
+Unlike traditional message queues (RabbitMQ, ActiveMQ), Kafka retains events after delivery,
+enabling late consumers to join the system and catch up on historical events.
+
+\subsection{Change Data Capture (CDC)}
+
+CDC is the practice of streaming every INSERT, UPDATE, and DELETE from a relational database
+into downstream systems in near real time.
+\textbf{Debezium}, the leading open-source CDC tool, connects to the database's replication log
+(PostgreSQL WAL, MySQL binlog, Oracle LogMiner) and publishes change events to Kafka topics.
+Consumers can then build materialised views, search indexes, or analytical aggregates that
+stay current within seconds of the source database change — without polling the database.
+Kafka's log compaction feature is particularly valuable here: a compacted topic retains the
+latest record per key, effectively functioning as a full replica of the current database state.
+
+\subsection{Log Aggregation}
+
+Distributed systems running hundreds of servers produce logs in disparate formats across many
+machines.
+Shipping these logs directly to a central store (Elasticsearch, Splunk, S3) creates tight
+coupling between log producers and the storage backend.
+Kafka acts as a \textbf{log buffer}: lightweight agents (Filebeat, Fluentd) tail log files and
+publish entries to a Kafka topic; consumers (Logstash, Flink) parse, filter, and route them to
+storage.
+This decoupling means the log storage backend can be changed or scaled without touching the
+hundreds of log-producing services.
+
+\subsection{Metrics and Monitoring}
+
+Time-series metrics (CPU utilisation, request latency percentiles, error rates) are naturally
+event-shaped data.
+Publishing metrics to Kafka allows them to fan out to multiple consumers simultaneously:
+a Prometheus-compatible consumer for real-time alerting, a Flink job for anomaly detection,
+and an S3 consumer for long-term retention — all from a single Kafka topic, with no additional
+load on the metrics producer.
+Kafka's configurable retention window also enables retrospective analysis: if an alert fires at
+3\,am, the raw metric stream can be replayed from before the incident began.
+
+\subsection{Event Sourcing}
+
+In an event-sourced system, the authoritative state of an entity is not stored as a mutable
+database row but as an ordered sequence of immutable events in Kafka (e.g.\ \texttt{OrderPlaced},
+\texttt{PaymentReceived}, \texttt{OrderShipped}).
+Application state is reconstructed on demand by replaying the event log.
+Kafka's \textbf{log compaction} mode retains the latest record for each key, providing an
+efficient snapshot of the current state without replaying the full history.
+This pattern provides a natural audit log, simplifies debugging (replay past events to reproduce
+bugs), and enables event-driven projections to be rebuilt at any time.
+
+\subsection{Stream ETL}
+
+Traditional ETL (Extract → Transform → Load) runs nightly batch jobs that move data from
+operational systems into data warehouses.
+Stream ETL (more accurately described as ELT) inverts this: events land in Kafka continuously,
+a stream processor (Flink or Spark) transforms and enriches them in real time, and clean records
+are written to the warehouse within seconds of the original event.
+This is the pattern used in Streamify: Eventsim → Kafka → PyFlink (enrich, deduplicate) →
+Snowflake (raw staging) → dbt (star schema) → Power BI.
+The result is a BI dashboard whose data is fresher than any nightly batch pipeline could achieve.

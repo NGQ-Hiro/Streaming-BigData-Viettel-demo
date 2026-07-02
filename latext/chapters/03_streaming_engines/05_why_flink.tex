@@ -1,12 +1,116 @@
 \section{Why Apache Flink Was Chosen for Streamify}
 
-% TODO: Justify the choice — lower latency, better event-time semantics,
-%       StatementSet for multi-sink jobs, and the growing adoption in production.
+After evaluating Apache Spark Structured Streaming and Apache Flink against the requirements
+of the Streamify pipeline, Flink was selected as the stream-processing engine.
+This section explains the five decisive factors behind that choice.
 
+\subsection{Lower Latency Without Configuration Trade-offs}
+
+Spark's default micro-batch mode imposes an irreducible latency floor equal to the trigger
+interval.
+Even setting the interval to its minimum (1\,ms) does not eliminate the per-batch planning
+overhead — catalyst optimisation, task scheduling, and shuffle materialisation all add latency
+before a single record reaches the sink.
+
+Flink's true event-at-a-time model has no such floor.
+Each record flows through the operator DAG and reaches the Snowflake JDBC sink within the
+time it takes to execute the processing logic for that single record — typically single-digit
+milliseconds on a local Docker deployment.
+For a music streaming analytics platform where dashboard freshness directly impacts user
+experience, this difference is meaningful even in a prototype: shorter end-to-end latency
+means analysts see the current play counts rather than those from the last trigger window.
+
+\subsection{Correct Event-time Handling via Watermarks}
+
+Eventsim timestamps events at the moment they are \emph{generated} (event time), not the moment
+they arrive at Kafka or Flink (processing time).
+Network jitter, Docker scheduling delays, and Eventsim's own batching mean that events can
+arrive at Flink slightly out of order relative to their timestamps.
+
+Flink provides \textbf{first-class event-time support} through its watermark mechanism.
+A watermark strategy (e.g.\ \texttt{WatermarkStrategy.forBoundedOutOfOrderness(Duration.ofSeconds(5))})
+can be attached directly to the Kafka source, telling Flink's windowed operators to wait up to
+5 seconds for late-arriving events before closing a window.
+In Spark, event-time watermarks are also supported but require the user to explicitly configure
+\texttt{withWatermark()} on each streaming DataFrame and are less tightly integrated with the
+checkpoint mechanism.
+Flink's watermark infrastructure required zero additional code in Streamify: the default
+monotonous watermark on the \texttt{ts} column was sufficient for the project's aggregation queries.
+
+\subsection{Single Job for Multiple Sinks via StatementSet}
+
+Streamify must write three independent streams — \texttt{listen\_events},
+\texttt{page\_view\_events}, and \texttt{auth\_events} — to three separate Snowflake tables.
+A naive implementation would launch three separate Flink jobs, each with its own checkpoint cycle,
+TaskManager slots, and JDBC connection pool.
+
+Flink's \textbf{Table API \texttt{StatementSet}} pattern allows all three \texttt{INSERT INTO}
+statements to be registered and submitted as a \textbf{single job}:
+
+\begin{lstlisting}[language=Python, caption={StatementSet submits three INSERT pipelines as one Flink job.}]
+stmt_set = table_env.create_statement_set()
+stmt_set.add_insert("sink_listen_events",    listen_query)
+stmt_set.add_insert("sink_page_view_events", page_view_query)
+stmt_set.add_insert("sink_auth_events",      auth_query)
+stmt_set.execute().get_job_client()
+\end{lstlisting}
+
+The result is one shared execution graph with one checkpoint barrier cycle covering all three
+pipelines simultaneously.
+A single checkpoint means the offsets for all three Kafka topics advance atomically — there is
+no window of inconsistency where one topic is checkpointed ahead of another.
+This is structurally impossible to achieve with three independently running Spark queries.
+
+\subsection{Python Support via PyFlink}
+
+The Streamify implementation is written entirely in Python — a natural choice given the
+data engineering team's existing Python proficiency.
+PyFlink exposes both the Table API (high-level SQL-like operations) and the DataStream API
+(low-level operator control) from Python, and supports Python UDFs for custom transformations.
+
+In Streamify, a Python UDF (\texttt{string\_decode}) is registered directly in the Flink
+execution environment to convert latin1-escaped artist and song names to UTF-8 before writing
+to Snowflake:
+
+\begin{lstlisting}[language=Python, caption={Registering a Python UDF in PyFlink.}]
+@udf(result_type=DataTypes.STRING())
+def string_decode(s: str) -> str:
+    try:
+        return s.encode('latin1').decode('unicode-escape').encode('latin1').decode('utf-8')
+    except Exception:
+        return s
+
+table_env.create_temporary_function("string_decode", string_decode)
+\end{lstlisting}
+
+Spark also supports Python (PySpark), but PySpark UDFs suffer from a significant performance
+penalty: each UDF call requires serialising data from the JVM to the Python interpreter via
+the Arrow/Pickle bridge.
+PyFlink UDFs for the Table API run inside the Python worker process and access state without
+round-tripping through the JVM for scalar functions, making them more efficient for
+record-level transformations like string decoding.
+
+\subsection{Native Exactly-once Semantics with the JDBC Sink}
+
+Streamify's correctness requirement is strict: \textbf{no event may appear twice in Snowflake},
+even if the Flink job is restarted mid-run.
+Achieving exactly-once end-to-end with Spark requires the application to implement idempotent
+writes (e.g.\ using a unique key to detect and overwrite duplicates) or to use a transactional
+sink connector — additional engineering effort beyond the core pipeline logic.
+
+Flink's checkpointing protocol natively integrates with JDBC sinks via a two-phase commit (2PC)
+pattern:
 \begin{enumerate}
-  \item \textbf{Lower latency} — true event-at-a-time processing meets the real-time requirement; no trigger interval floor.
-  \item \textbf{Event-time accuracy} — out-of-order Eventsim events are handled correctly via watermarks without extra workarounds.
-  \item \textbf{Multi-sink StatementSet} — three Kafka topics can be written to Snowflake in a single Flink job with one \texttt{StatementSet.execute()} call.
-  \item \textbf{Python support (PyFlink)} — Table API and Python UDFs enable clean, maintainable code without requiring Java or Scala.
-  \item \textbf{Native exactly-once} — Flink's 2PC checkpointing integrates directly with the JDBC sink, removing the need for application-level idempotency logic.
+  \item During a checkpoint, the JDBC sink \textbf{pre-commits} the current batch of rows to a
+        Snowflake staging area but does not make them visible.
+  \item Once the JobManager declares the checkpoint complete, the sink \textbf{finalises} the
+        commit, making the rows visible to queries.
+  \item If the job crashes before the checkpoint completes, the pre-committed rows are rolled back.
+        On restart, Flink replays from the last completed checkpoint offset, and the sink
+        re-inserts the same rows — with exactly the same outcome.
 \end{enumerate}
+
+This protocol required no application-level deduplication logic in Streamify.
+The exactly-once guarantee is enforced at the connector layer, and verified experimentally by
+deliberately killing the Flink TaskManager mid-run and confirming that no duplicate rows
+appeared in Snowflake after recovery.

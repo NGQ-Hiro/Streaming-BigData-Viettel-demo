@@ -1,18 +1,108 @@
 \section{Kafka in the Streamify Pipeline}
 
-% TODO: Describe how Eventsim publishes to three topics and how Flink consumes
-%       them; mention the Confluent broker and Schema Registry used in the project.
+Streamify deploys a \textbf{Confluent Platform} Kafka broker inside Docker Compose,
+leveraging the Confluent image (\texttt{confluentinc/cp-kafka}) alongside the Confluent
+Schema Registry and Confluent Control Center for schema enforcement and real-time monitoring.
 
-In Streamify, a Confluent Kafka broker (running in Docker) receives events from
-Eventsim across three topics:
+\subsection{Broker Configuration}
+
+The broker is configured with two listener addresses:
 
 \begin{itemize}
-  \item \texttt{listen\_events} — song-play events (artist, song, duration, timestamp, user metadata).
-  \item \texttt{page\_view\_events} — navigation and page-view events (page, method, status).
-  \item \texttt{auth\_events} — user authentication events (success/failure, session metadata).
+  \item \textbf{\texttt{PLAINTEXT://broker:29092}} — the internal Docker network listener
+        used by all other containers (Eventsim producer, PyFlink consumer, Control Center).
+  \item \textbf{\texttt{PLAINTEXT\_HOST://localhost:9092}} — the host machine listener,
+        allowing local development tools (e.g.\ \texttt{kafka-console-consumer}) to connect.
 \end{itemize}
 
-The Confluent Control Center (port \texttt{9021}) and Schema Registry (port
-\texttt{8081}) are also deployed to monitor topic health and enforce JSON schemas.
-Flink connects to the broker at \texttt{broker:29092} and consumes all three
-topics in parallel using the \texttt{flink-connector-kafka} source.
+Key broker settings relevant to the pipeline:
+
+\begin{table}[H]
+  \centering
+  \caption{Confluent Kafka broker settings in Streamify.}
+  \label{tab:kafka-config}
+  \begin{tabularx}{\textwidth}{lX}
+    \toprule
+    \textbf{Setting}                         & \textbf{Value / Effect} \\
+    \midrule
+    \texttt{KAFKA\_OFFSETS\_TOPIC\_REPLICATION\_FACTOR} & 1 — single-broker local deployment; no replication needed. \\
+    \texttt{KAFKA\_GROUP\_INITIAL\_REBALANCE\_DELAY\_MS} & 0 — consumer groups rebalance immediately on startup, avoiding cold-start delays. \\
+    \texttt{KAFKA\_TRANSACTION\_STATE\_LOG\_MIN\_ISR}    & 1 — allows exactly-once transactions with a single broker. \\
+    \texttt{KAFKA\_TRANSACTION\_STATE\_LOG\_REPLICATION\_FACTOR} & 1 — consistent with single-broker setup. \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\subsection{Topics}
+
+Three topics are auto-created by Eventsim on first publish.
+Each topic is configured with \textbf{1 partition} (sufficient for the single-consumer Flink job)
+and \textbf{1 replica} (single-broker deployment):
+
+\begin{itemize}
+  \item \textbf{\texttt{listen\_events}} — one record per song-play interaction.
+        Fields include: \texttt{artist}, \texttt{song}, \texttt{duration}, \texttt{ts} (epoch ms),
+        \texttt{userId}, \texttt{level} (free/paid), \texttt{city}, \texttt{state}, \texttt{lat}, \texttt{lon}.
+  \item \textbf{\texttt{page\_view\_events}} — one record per page navigation.
+        Fields include: \texttt{page}, \texttt{method}, \texttt{status}, \texttt{sessionId},
+        \texttt{userId}, \texttt{ts}, \texttt{userAgent}.
+  \item \textbf{\texttt{auth\_events}} — one record per login/logout.
+        Fields include: \texttt{success} (boolean), \texttt{level}, \texttt{sessionId}, \texttt{ts}.
+\end{itemize}
+
+All events are serialised as \textbf{JSON} (not Avro) to keep schema management simple
+for this educational project.
+A Confluent Schema Registry (port \texttt{8081}) is deployed alongside the broker
+and is available for future migration to Avro with schema evolution support.
+
+\subsection{Producer: Eventsim}
+
+Eventsim runs in its own Docker container and publishes events to the broker at
+\texttt{broker:29092} using the standard Confluent Kafka Java producer.
+It simulates a configurable number of concurrent users (\texttt{--nusers}) over a specified
+time window (\texttt{--from}, \texttt{--to}), producing a realistic mix of listen, page-view,
+and authentication events based on the Million Songs Dataset.
+
+The producer does \emph{not} use a message key, so events are distributed across partitions
+round-robin.
+Because each topic has only one partition in the local setup, all records land in partition 0
+and are therefore \textbf{globally ordered within each topic}.
+
+\subsection{Consumer: Apache Flink (PyFlink)}
+
+The PyFlink job registers all three topics as Flink SQL source tables using the
+\texttt{flink-connector-kafka} library.
+The consumer is configured with:
+
+\begin{itemize}
+  \item \textbf{Consumer group ID}: \texttt{flink-streamify} — a single group shared across
+        all three source operators so that Kafka tracks one set of offsets per topic.
+  \item \textbf{Startup mode}: \texttt{earliest-offset} — on cold start, Flink reads from the
+        beginning of each partition, ensuring no events are missed if Eventsim started before Flink.
+  \item \textbf{Exactly-once integration}: Flink's checkpoint barriers coordinate with the
+        Kafka consumer's offset commits.
+        Offsets are only committed to Kafka once the corresponding Flink checkpoint is
+        successfully persisted — preventing any event from being skipped or re-processed
+        on recovery.
+\end{itemize}
+
+All three source operators are combined in a single \texttt{StatementSet}, which Flink compiles
+into one execution graph with a shared checkpoint cycle.
+This means all three Kafka→Snowflake pipelines advance their checkpoints together,
+guaranteeing a consistent cut across all topics.
+
+\subsection{Monitoring with Confluent Control Center}
+
+The Confluent Control Center (port \texttt{9021}) provides a web UI for observing the live
+state of the Kafka cluster:
+
+\begin{itemize}
+  \item \textbf{Topic throughput} — messages per second produced and consumed, per topic.
+  \item \textbf{Consumer lag} — the offset delta between the latest produced record and the
+        last committed consumer offset; a rising lag indicates that Flink is falling behind.
+  \item \textbf{Partition leaders} — which broker holds the leader replica for each partition.
+  \item \textbf{Schema Registry} — registered schemas and their compatibility levels.
+\end{itemize}
+
+In the local Docker Compose setup, the Control Center connects to the broker at
+\texttt{broker:29092} and to the Schema Registry at \texttt{schema-registry:8081}.

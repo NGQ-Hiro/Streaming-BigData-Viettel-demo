@@ -1,0 +1,160 @@
+{
+  "uid": "streamify-flink-resources",
+  "title": "Streamify - Flink CPU / Memory / Disk",
+  "tags": ["streamify", "flink", "resources"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "JVM CPU load (Flink)",
+      "description": "Status.JVM.CPU.Load — fraction of a CPU used by each Flink JVM.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "flink_jobmanager_Status_JVM_CPU_Load",
+          "legendFormat": "jobmanager"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "flink_taskmanager_Status_JVM_CPU_Load",
+          "legendFormat": "taskmanager {{tm_id}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "JVM threads",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "flink_jobmanager_Status_JVM_Threads_Count",
+          "legendFormat": "jobmanager"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "flink_taskmanager_Status_JVM_Threads_Count",
+          "legendFormat": "taskmanager {{tm_id}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "TaskManager memory (heap / managed / direct)",
+      "description": "Heap, Flink managed memory, and direct (network/off-heap) memory used.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "flink_taskmanager_Status_JVM_Memory_Heap_Used",
+          "legendFormat": "heap used {{tm_id}}"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "flink_taskmanager_Status_JVM_Memory_Heap_Max",
+          "legendFormat": "heap max {{tm_id}}"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "flink_taskmanager_Status_Flink_Memory_Managed_Used",
+          "legendFormat": "managed used {{tm_id}}"
+        },
+        {
+          "refId": "D",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "flink_taskmanager_Status_JVM_Memory_Direct_MemoryUsed",
+          "legendFormat": "direct used {{tm_id}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "JobManager heap memory",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "flink_jobmanager_Status_JVM_Memory_Heap_Used",
+          "legendFormat": "heap used"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "flink_jobmanager_Status_JVM_Memory_Heap_Max",
+          "legendFormat": "heap max"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "flink_jobmanager_Status_JVM_Memory_NonHeap_Used",
+          "legendFormat": "non-heap used"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Disk write throughput — all stack containers (cAdvisor)",
+      "description": "Docker Desktop's cAdvisor does not expose container names, so disk is shown stack-wide (sum over all docker containers) rather than per-Flink-container. Flink's ETL keeps no local disk state, so this is mostly Kafka log I/O.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(container_fs_writes_bytes_total{id=~\"/docker/.+\"}[5m]))",
+          "legendFormat": "writes"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(rate(container_fs_reads_bytes_total{id=~\"/docker/.+\"}[5m]))",
+          "legendFormat": "reads"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Filesystem usage — all stack containers (cAdvisor)",
+      "description": "Sum of container filesystem usage across the docker stack (see note on panel to the left about per-container naming on Docker Desktop).",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(container_fs_usage_bytes{id=~\"/docker/.+\"})",
+          "legendFormat": "fs usage (stack total)"
+        }
+      ]
+    }
+  ]
+}

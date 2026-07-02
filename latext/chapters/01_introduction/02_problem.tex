@@ -8,13 +8,45 @@ A music streaming platform generates three distinct categories of events in real
   \item \textbf{Authentication events} (\texttt{auth\_events}) — fired on login and logout, recording session validity and subscription level.
 \end{itemize}
 
-Processing these events in batch is insufficient for several reasons:
+To illustrate the scale of these events, Table~\ref{tab:event-rates} shows estimated
+event volumes under a modest 10,000 concurrent user simulation:
+
+\begin{table}[H]
+  \centering
+  \caption{Estimated event rates for a 10,000 concurrent user simulation.}
+  \label{tab:event-rates}
+  \begin{tabularx}{\textwidth}{lXX}
+    \toprule
+    \textbf{Event type}        & \textbf{Avg.\ rate (events/s)} & \textbf{Volume per hour} \\
+    \midrule
+    \texttt{listen\_events}    & $\sim$300                       & $\sim$1.1 million \\
+    \texttt{page\_view\_events}& $\sim$150                       & $\sim$540,000 \\
+    \texttt{auth\_events}      & $\sim$50                        & $\sim$180,000 \\
+    \midrule
+    \textbf{Total}             & $\sim$500                       & $\sim$1.8 million \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+Processing these events in batch is insufficient for four reasons:
 
 \begin{enumerate}
-  \item \textbf{Velocity} — a realistic platform generates thousands of events per second; buffering them for hours before processing wastes the time-sensitivity of the data.
-  \item \textbf{Volume} — accumulated event data grows rapidly; a pure batch approach requires ever-larger processing windows and infrastructure.
-  \item \textbf{Variety} — the three event types have different schemas, require different transformations, and must eventually be joined with dimension data (users, songs, artists) for analytics.
-  \item \textbf{Reliability} — any processing outage must not result in data loss; the pipeline must be able to resume exactly where it left off.
+  \item \textbf{Velocity} — at hundreds of events per second, buffering them for even one hour
+        means acting on data that is already stale.
+        A song that trended at 9\,pm cannot drive the 9\,pm featured-artists chart if the pipeline
+        only runs at midnight.
+  \item \textbf{Volume} — 1.8 million events per hour accumulate to over 43 million per day.
+        A batch job processing an entire day's events requires significant infrastructure and
+        introduces a latency proportional to the window size.
+  \item \textbf{Variety} — the three event types have different schemas, require different
+        transformations (timestamp normalisation, string decoding, partition column derivation),
+        and must eventually be joined with dimension data (users, songs, artists) for analytics.
+        Handling schema heterogeneity in batch SQL is cumbersome; a streaming job can apply
+        per-topic transformations in parallel.
+  \item \textbf{Reliability} — any processing outage must not result in data loss.
+        A batch job that crashes mid-run may leave partial results or require a full re-run.
+        A streaming pipeline with offset-based checkpointing can resume exactly where it stopped,
+        processing only the events that were not yet committed.
 \end{enumerate}
 
 The core challenge addressed in this report is therefore:

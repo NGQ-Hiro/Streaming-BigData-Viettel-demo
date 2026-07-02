@@ -1,0 +1,77 @@
+{
+  "uid": "streamify-flink-throughput",
+  "title": "Streamify - Flink Record Processing",
+  "tags": ["streamify", "flink"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Running jobs",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(flink_jobmanager_numRunningJobs)",
+          "legendFormat": "running jobs"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Records ingested/s (all sources)",
+      "description": "Records emitted per second by the Kafka source operators (task-level counters read 0 here because each Source->UDF->Sink pipeline is chained into one task).",
+      "gridPos": { "h": 6, "w": 18, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(flink_taskmanager_job_task_operator_numRecordsOutPerSecond{operator_name=~\"Source.*\"})",
+          "legendFormat": "records/s"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Records ingested/s by source topic",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (operator_name) (flink_taskmanager_job_task_operator_numRecordsOutPerSecond{operator_name=~\"Source.*\"})",
+          "legendFormat": "{{operator_name}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Total records processed (cumulative, by source topic)",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 15 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (operator_name) (flink_taskmanager_job_task_operator_numRecordsOut{operator_name=~\"Source.*\"})",
+          "legendFormat": "{{operator_name}}"
+        }
+      ]
+    }
+  ]
+}
