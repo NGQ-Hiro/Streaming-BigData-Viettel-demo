@@ -90,12 +90,12 @@
   \column{0.50\textwidth}
   \textbf{The Problem}
   \begin{itemize}
-    \item \textbf{Batch pipelines} — hours/days latency
-    \item \textbf{Time-sensitive data} — stale = lost value
-    \item \textbf{High velocity} — thousands of events/sec
-    \item \textbf{No replay} — failures cause data loss
+    \item \textbf{High latency} — jobs run hourly/daily, so insights lag reality by hours
+    \item \textbf{Stale decisions} — by the time data is processed, the moment to act has passed
+    \item \textbf{Resource spikes} — large periodic loads strain infra, then sit idle
+    % \item \textbf{Costly reprocessing} — a failure mid-job means rerunning the entire batch, not just what's new
   \end{itemize}
-  \vspace{0.4cm}
+
   \begin{center}
   \begin{tikzpicture}
     \node[draw, fill=red!10, rounded corners, minimum width=3.2cm, minimum height=0.6cm, align=center, font=\small] (b) {Batch: hours delay};
@@ -107,45 +107,25 @@
   \column{0.47\textwidth}
   \textbf{Stream Processing Enables}
   \begin{itemize}
-    \item \textbf{Real-time personalisation} — react in ms
-    \item \textbf{Live dashboards} — current state, not snapshot
-    \item \textbf{Fault tolerance} — exactly-once guarantees
-    \item \textbf{Decoupled services} — event-driven architecture
+    % \item \textbf{Real-time personalisation} — recommendations/pricing react within ms of user action
+    \item \textbf{Live monitoring \& alerting} — detect anomalies or failures as they happen, not next morning
+    \item \textbf{Continuous aggregation} — dashboards show current counts/metrics, not a stale snapshot
+    \item \textbf{Smooth, steady load} — events processed as they arrive, avoiding the resource spikes of periodic batch runs
   \end{itemize}
-  \vspace{0.3cm}
-  \textbf{This Project:} simulate a music streaming platform generating \textbf{3 event types} and process them end-to-end in real time.
+
 \end{columns}
 \end{frame}
 
 % ── Frame 4: Objectives & Scope ───────────────────────────────────────────────
-\begin{frame}{Objectives \& Scope}
-\begin{columns}
-  \column{0.52\textwidth}
+\begin{frame}{Objectives}
   \textbf{Objectives}
-  \begin{enumerate}
-    \item Understand \textbf{stream-processing} concepts
-    \item Evaluate \textbf{Apache Kafka} as event transport
-    \item Compare \textbf{Spark vs Flink}
-    \item Build \textbf{Streamify} — full ELT pipeline
-    % \item Visualise insights with \textbf{Power BI}
+  \begin{enumerate}\setlength\itemsep{3pt}
+    \item Overview \textbf{Apache Kafka} as message queue
+    \item Compare \textbf{Spark Streaming vs Flink} for streaming processing
+    \item Build ELT streaming pipeline
+    \item Demonstrate real-time dashboard with live metrics
   \end{enumerate}
 
-  \column{0.44\textwidth}
-  \textbf{In Scope}
-  \begin{itemize}\small
-    \item Kafka → Flink → Snowflake pipeline
-    \item Spark micro-batch vs Flink true-streaming
-    \item dbt star schema + Airflow scheduling
-    \item Local Docker Compose deployment
-  \end{itemize}
-  \vspace{0.2cm}
-  \textbf{Out of Scope}
-  \begin{itemize}\small
-    \item Real-time ML / recommendations
-    \item Cloud / Kubernetes deployment
-    \item Schema evolution (Avro/CDC)
-  \end{itemize}
-\end{columns}
 \end{frame}
 
 %=============================================================================
@@ -224,8 +204,9 @@
   \begin{enumerate}
     \item \textbf{Unbounded data} — stream never ends; state must be bounded
     \item \textbf{Out-of-order events} — need watermarks to handle late arrivals
+    \item \textbf{Latency} — must process quickly to keep up with incoming data
     \item \textbf{Fault tolerance} — recover without loss or duplicates; exactly-once semantics
-    \item \textbf{State Management} — large state must be checkpointed to durable storage (e.g., local, cloud)
+    \item \textbf{State \& Checkpoint Management} — large state must be checkpointed to durable storage (e.g., local, cloud)
   \end{enumerate}
   \end{columns}
 \end{frame}
@@ -323,7 +304,7 @@
   Latency             & 100 ms–s (micro-batch); sub-100 ms (RTM)         & 1–10 ms \\
   State management    & In-memory / RocksDB (Spark 3.2+); managed per trigger & RocksDB or heap; always-live, keyed state \\
   Checkpoint          & WAL per micro-batch                              & Async Chandy-Lamport barriers; incremental snapshots \\
-  Use case            & Unified batch + streaming; ML pipelines          & Low-latency, stateful, CEP, event-time joins \\
+  Use case            & Unified batch + streaming                        & Low-latency, stateful, CEP, event-time joins \\
   \bottomrule
 \end{tabularx}
 \vspace{0.3cm}
@@ -333,7 +314,37 @@
 \section{Application: Streamify Pipeline}
 %=============================================================================
 
-% ── Frame 11: Architecture Overview ──────────────────────────────────────────
+% ── Frame 11: Why Streamify? ─────────────────────────────────────────────────
+\begin{frame}{Why Streamify?}
+\begin{columns}
+  \column{0.50\textwidth}
+  \textbf{The Use Case}
+  \begin{itemize}\small
+    \item Music streaming platforms generate \textbf{continuous, high-velocity events} — every play, skip, pause, and login is an event
+    \item Users expect \textbf{live charts} and real-time fraud detection — batch pipelines cannot deliver this
+    \item A realistic domain to validate all theoretical concepts end-to-end
+  \end{itemize}
+  \vspace{0.15cm}
+  \textbf{3 Event Types Simulated}
+  \begin{itemize}\small
+    \item \texttt{listen\_events} — song plays, skips, durations
+    \item \texttt{page\_view\_events} — user navigation behaviour
+    \item \texttt{auth\_events} — logins, session starts/ends
+  \end{itemize}
+
+  \column{0.47\textwidth}
+  \textbf{What Streamify Validates}
+  \begin{itemize}\small
+    \item \textbf{Kafka} — durable, decoupled event bus between producer and all downstream consumers
+    \item \textbf{PyFlink} — low-latency, exactly-once ingestion into Snowflake
+    \item \textbf{dbt} — transforms raw staging data into an analytics-ready star schema
+    \item \textbf{Airflow} — orchestrates transformation runs reliably
+    \item \textbf{Power BI} — surfaces live insights from a pre-joined wide view
+  \end{itemize}
+\end{columns}
+\end{frame}
+
+% ── Frame 12: Architecture Overview ──────────────────────────────────────────
 \begin{frame}{Streamify: End-to-End Architecture}
 \centering
 \includegraphics[width=0.80\textwidth]{app/overview.png}
@@ -356,7 +367,7 @@
   \begin{itemize}\small
     \item \textbf{dbt} — builds star schema inside Snowflake\\
           (fact\_streams + 5 dim tables + wide\_streams view)
-    \item \textbf{Airflow} — schedules daily dbt run via DockerOperator
+    \item \textbf{Airflow} — schedules dbt run via DockerOperator
   \end{itemize}
 
   \column{0.48\textwidth}
@@ -406,20 +417,13 @@
   \item \textbf{Flink} delivers sub-10 ms latency, native event-time semantics, and exactly-once guarantees — outperforming Spark for stateful real-time workloads
   \item \textbf{ELT pattern} keeps concerns separate: Flink loads raw events, dbt transforms inside Snowflake, Airflow orchestrates
 \end{enumerate}
-\vspace{0.4cm}
+
 \textbf{Future Directions}
-\begin{columns}
-  \column{0.48\textwidth}
-  \begin{itemize}
-    \item \textbf{Flink CDC} — replace Eventsim with Debezium for real database change streams
-    \item \textbf{Schema evolution} — Confluent Schema Registry + Avro
-  \end{itemize}
-  \column{0.48\textwidth}
-  \begin{itemize}
-    \item \textbf{Real-time ML} — Flink ML model for song recommendations
-    \item \textbf{Cloud} — migrate to Kinesis + Confluent Cloud
-  \end{itemize}
-\end{columns}
+\begin{itemize}
+  \item \textbf{Cloud} — migrate to Kinesis + Confluent Cloud
+  \item \textbf{Schema evolution} — Confluent Schema Registry + Avro
+\end{itemize}
+
 \end{frame}
 
 % ── Frame 15: The End ─────────────────────────────────────────────────────────
