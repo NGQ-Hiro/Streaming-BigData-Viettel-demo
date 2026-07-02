@@ -72,6 +72,40 @@
           "legendFormat": "{{operator_name}}"
         }
       ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Records/s by TaskManager",
+      "description": "Records emitted per second broken down per TaskManager instance. Each TM handles one Kafka partition.",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "axisSoftMin": 0 } }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (instance) (flink_taskmanager_job_task_operator_numRecordsOutPerSecond{operator_name=~\"Source.*\"})",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Total records processed (cumulative, by TaskManager)",
+      "description": "Cumulative records emitted per TaskManager instance since the job started.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "axisSoftMin": 0 } }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum by (instance) (flink_taskmanager_job_task_operator_numRecordsOut{operator_name=~\"Source.*\"})",
+          "legendFormat": "{{instance}}"
+        }
+      ]
     }
   ]
 }

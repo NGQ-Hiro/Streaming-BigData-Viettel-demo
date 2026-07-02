@@ -440,6 +440,32 @@
 \end{columns}
 \end{frame}
 
+\begin{frame}{Dashboard: Kafka Consumer Lag}
+  \begin{center}
+    \includegraphics[width=0.92\textwidth]{images/monitor/kafka_lag.png}
+  \end{center}
+  \vspace{-0.2cm}
+  {\small \textbf{Metric:} \texttt{kafka\_consumergroup\_lag} — consumer-group offset behind the latest partition offset.
+  A lag of 0 means Flink is processing events as fast as Kafka receives them.}
+\end{frame}
+
+\begin{frame}{Dashboard: Flink Record Processing}
+  \begin{center}
+    \includegraphics[width=0.92\textwidth]{images/monitor/flink_record_processed.png}
+  \end{center}
+  \vspace{-0.2cm}
+  {\small \textbf{Metric:} \texttt{numRecordsOutPerSecond} per source operator — records flowing through each Kafka topic per second, broken down by TaskManager.}
+\end{frame}
+
+\begin{frame}{Dashboard: Flink CPU \& Memory}
+  \begin{center}
+    \includegraphics[width=0.92\textwidth]{images/monitor/flink_memory.png}
+  \end{center}
+  \vspace{-0.2cm}
+  {\small \textbf{Metrics:} JVM CPU load, heap used, and Flink managed memory per TaskManager.
+  Managed memory is off-heap (no GC pressure); heap spikes indicate state or UDF object allocation.}
+\end{frame}
+
 
 
 %=============================================================================

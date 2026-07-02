@@ -63,6 +63,14 @@ Three pre-built dashboards are provisioned automatically via Grafana's file-base
         enabling the 10-second checkpoint interval (Section~\ref{sec:flink}) is therefore a
         prerequisite for this dashboard to show data.
 
+        \begin{figure}[H]
+          \centering
+          \includegraphics[width=0.92\textwidth]{../image/kafka_lag.png}
+          \caption{Kafka Lag dashboard: consumer-group lag per topic and consumption rate (msgs/s).
+                   A lag of zero indicates Flink is processing events as fast as Kafka receives them.}
+          \label{fig:dashboard-kafka-lag}
+        \end{figure}
+
   \item \textbf{Flink Record Processing} — shows records ingested per second using the
         operator-scope metric
         \texttt{flink\_taskmanager\_job\_task\_operator\_numRecordsOutPerSecond}
@@ -71,12 +79,28 @@ Three pre-built dashboards are provisioned automatically via Grafana's file-base
         Source$\to$UDF$\to$Sink pipelines; the operator-scope metric is the correct
         alternative.
 
+        \begin{figure}[H]
+          \centering
+          \includegraphics[width=0.92\textwidth]{../image/flink_record_processed.png}
+          \caption{Flink Record Processing dashboard: records emitted per second per source operator,
+                   broken down by TaskManager instance.}
+          \label{fig:dashboard-flink-throughput}
+        \end{figure}
+
   \item \textbf{Flink CPU / Memory} — three sections (CPU, Memory, Network) show:
         JVM CPU load per TaskManager and JobManager;
         heap used and Flink managed memory per TaskManager;
         and network direct-memory usage alongside input/output buffer pool utilisation.
         Buffer pool usage approaching 1.0 indicates back-pressure — records accumulating
         faster than the downstream operator can consume them.
+
+        \begin{figure}[H]
+          \centering
+          \includegraphics[width=0.92\textwidth]{../image/flink_memory.png}
+          \caption{Flink CPU / Memory dashboard: per-TaskManager JVM CPU load, heap usage,
+                   and Flink managed (off-heap) memory.}
+          \label{fig:dashboard-flink-memory}
+        \end{figure}
 \end{enumerate}
 
 Dashboards are provisioned automatically using Grafana's file-based provisioning~\cite{grafana_provisioning}.
