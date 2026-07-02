@@ -1,7 +1,7 @@
 from streaming_functions import create_env, create_kafka_source, create_snowflake_sink, build_insert_sql
 from schema import SCHEMAS
 
-KAFKA_BROKER = "broker:29092"
+KAFKA_BROKER = "broker-1:29092,broker-2:29092,broker-3:29092"
 
 # (kafka_topic, snowflake_table, decode_latin1_strings)
 TOPICS = [

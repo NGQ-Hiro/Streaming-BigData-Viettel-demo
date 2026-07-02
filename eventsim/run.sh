@@ -16,7 +16,7 @@ docker run --name eventsim_temp --rm \
   --nusers 20000 \
   --growth-rate 10 \
   --userid 1 \
-  --kafkaBrokerList broker:29092
+  --kafkaBrokerList broker-1:29092,broker-2:29092,broker-3:29092
 
 # stop container after finishing
 docker rm -f eventsim_temp >/dev/null 2>&1 || true

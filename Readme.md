@@ -23,7 +23,7 @@ The Docker image is borrowed from [viirya's fork](https://github.com/viirya/even
 The project follows a modern data stack (ELT) architecture, composed of six main stages:
 
 1.  **Data Simulation (Eventsim):** Real-time music event data (e.g., page views, song plays) is generated using **[Eventsim](https://github.com/Interana/eventsim)** to simulate a real-world user base.
-2.  **Ingestion & Messaging (Kafka):** The raw event data is captured by **Apache Kafka**, which acts as a highly reliable and scalable distributed event store.
+2.  **Ingestion & Messaging (Kafka):** The raw event data is captured by **Apache Kafka**, which acts as a highly reliable and scalable distributed event store. The platform runs a **3-node Kafka cluster** on the official **`apache/kafka:4.0.0`** image in **KRaft mode** (no Zookeeper) — each node acts as both broker and controller, and the internal topics use a replication factor of 3 (min ISR 2) for fault tolerance and high availability.
 3.  **Real-Time Processing (Apache Flink):** **Apache Flink** connects to the Kafka topic, consuming the event stream in real-time. It performs crucial cleaning and transformation using Flink's DataStream/Table API before writing the data into the data warehouse.
 4.  **Cloud Data Warehouse (Snowflake):** **Snowflake** serves as the central data warehouse, providing a scalable "single source of truth" for all processed data from Flink.
 5.  **Data Transformation (dbt):** Once the data is in Snowflake, **dbt (data build tool)** runs transformation jobs directly within the warehouse to convert the data into a clean, analytics-ready **star schema**.
