@@ -1,5 +1,0 @@
-\beamer@sectionintoc {1}{Introduction}{3}{0}{1}
-\beamer@sectionintoc {2}{Message Queue: Apache Kafka}{6}{0}{2}
-\beamer@sectionintoc {3}{Streaming Processing Engines}{9}{0}{3}
-\beamer@sectionintoc {4}{Application: Streamify Pipeline}{14}{0}{4}
-\beamer@sectionintoc {5}{Conclusion}{18}{0}{5}

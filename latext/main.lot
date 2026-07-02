@@ -1,9 +1,0 @@
-\addvspace {10\p@ }
-\addvspace {10\p@ }
-\contentsline {table}{\numberline {2.1}{\ignorespaces Common Apache Kafka use cases.}}{11}{table.caption.7}%
-\addvspace {10\p@ }
-\contentsline {table}{\numberline {3.1}{\ignorespaces Data processing comparison: micro-batch vs.\ real-time mode.}}{19}{table.caption.17}%
-\contentsline {table}{\numberline {3.2}{\ignorespaces Apache Spark Structured Streaming vs Apache Flink.}}{29}{table.caption.33}%
-\addvspace {10\p@ }
-\contentsline {table}{\numberline {4.1}{\ignorespaces Streamify technology stack.}}{31}{table.caption.35}%
-\contentsline {table}{\numberline {4.2}{\ignorespaces Streamify pipeline evaluation summary.}}{37}{table.caption.41}%
