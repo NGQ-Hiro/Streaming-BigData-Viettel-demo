@@ -7,7 +7,7 @@ SELECT
     listen_events.ts AS ts
 FROM {{source('staging', 'listen_events') }} 
 LEFT JOIN {{ref('dim_datetime')}} 
-    ON dim_datetime.datehour = date_trunc(hour, listen_events.ts)
+    ON dim_datetime.datehour = date_trunc('HOUR', listen_events.ts)
 LEFT JOIN {{ref('dim_users')}} 
     ON listen_events.userId = dim_users.userId AND CAST(listen_events.ts as DATE) >= dim_users.rowActivationDate AND CAST(listen_events.ts as DATE) < dim_users.rowExpirationDate
 LEFT JOIN {{ref('dim_locations')}} 

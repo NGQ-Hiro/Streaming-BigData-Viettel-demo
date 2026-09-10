@@ -22,6 +22,13 @@ clean-targets:         # directories to be removed by `dbt clean`
   - "target"
   - "dbt_packages"
 
+# Namespace creation only -- the streaming job now owns creating the bronze
+# Iceberg tables directly in the shared SparkSessionCatalog, so no more
+# per-table CREATE TABLE ... LOCATION registration here.
+on-run-start:
+  - "CREATE DATABASE IF NOT EXISTS staging"
+  - "CREATE DATABASE IF NOT EXISTS analytics"
+  - "CREATE DATABASE IF NOT EXISTS dim"
 
 # Configuring models
 # Full documentation: https://docs.getdbt.com/docs/configuring-models
@@ -32,11 +39,16 @@ clean-targets:         # directories to be removed by `dbt clean`
 models:
   my_project:
     # Config indicated by + and applies to all files under models/example/
-    +schema: ANALYTICS
+    +schema: analytics
     +materialized: table
+    # Gold is a full rebuild every run (no incremental models in this
+    # project) -- `table` + `file_format: iceberg` gives a full overwrite
+    # each `dbt run`. Table location is managed by the catalog warehouse
+    # (SparkSessionCatalog), no location_root needed.
+    +file_format: iceberg
     dim:
-      +schema: DIM
-    
+      +schema: dim
+
 
 
 seeds:

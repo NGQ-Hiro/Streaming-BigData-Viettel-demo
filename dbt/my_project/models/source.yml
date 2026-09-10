@@ -1,11 +1,13 @@
 
 sources:
   - name: staging          # logical name for the source
-    database: STREAMIFY         # Snowflake database
-    schema: STAGING           # Snowflake schema
+    schema: staging           # Spark catalog database (registered by the
+                               # on-run-start hook in dbt_project.yml)
     tables:
-      - name: listen_events     
-      - name: page_view_events    
-      - name: auth_events        
-      - name: songs 
-      - name: state_codes
+      - name: listen_events     # bronze Iceberg table, staging.listen_events
+      - name: page_view_events  # bronze Iceberg table, staging.page_view_events
+      - name: auth_events       # bronze Iceberg table, staging.auth_events
+      - name: songs             # dbt seed (seeds config also lands this in the
+                                 # `staging` database — see dbt_project.yml)
+      # state_codes dropped: it's only ever referenced via ref('state_codes'),
+      # never source('staging', 'state_codes') — the old source entry was dead.

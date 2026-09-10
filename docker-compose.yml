@@ -1,7 +1,14 @@
-x-flink-common: &flink-common
-  build: ./flink_streaming
-  volumes:
-    - ./flink_streaming/jobs:/opt/flink/jobs
+# Dev: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# Shared image for the Spark standalone cluster (master/worker) and the
+# streaming driver — same jars/conf baked in for all three. Build context is
+# the repo root (not ./spark_streaming) so the Dockerfile can COPY the
+# shared entrypoint.sh / spark-conf/ templates from the repo root.
+x-spark-common: &spark-common
+  build:
+    context: .
+    dockerfile: spark_streaming/Dockerfile
+  image: spark-lakehouse:latest
   networks:
     - my-network
 
@@ -135,70 +142,56 @@ services:
     networks:
       - my-network
 
-  flink-jobmanager:
-    <<: *flink-common
-    hostname: flink-jobmanager
-    container_name: flink-jobmanager
-    command: jobmanager
+  spark-master:
+    <<: *spark-common
+    hostname: spark-master
+    container_name: spark-master
+    command: ["spark-class", "org.apache.spark.deploy.master.Master", "--host", "spark-master"]
     ports:
-      - "8083:8081"
-      - "9249:9249"
-    environment:
-      FLINK_PROPERTIES: |
-        jobmanager.rpc.address: flink-jobmanager
-        rest.port: 8081
-        cluster.evenly-spread-out-slots: true
-        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
-        metrics.reporter.prom.port: 9249
+      - "8086:8080"
+      - "7077:7077"
 
-  flink-taskmanager:
-    <<: *flink-common
-    command: taskmanager
+  spark-worker:
+    <<: *spark-common
+    command: ["spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
     depends_on:
-      - flink-jobmanager
+      - spark-master
     deploy:
-      replicas: 3
+      replicas: 2
     environment:
-      FLINK_PROPERTIES: |
-        jobmanager.rpc.address: flink-jobmanager
-        taskmanager.numberOfTaskSlots: 4
-        taskmanager.memory.process.size: 1728m
-        metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
-        metrics.reporter.prom.port: 9249
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_MEMORY: 2g
+    # Range form so each of the 2 replicas gets its own host port (a fixed
+    # single mapping would collide on the second replica).
+    ports:
+      - "8087-8088:8081"
 
-  # One-shot job submitter: waits for a free task slot, then submits the
-  # PyFlink job detached so it survives after this container exits. Skips if a
-  # job is already RUNNING (avoids duplicates on repeated `compose up`).
-  flink-job-submitter:
-    <<: *flink-common
-    container_name: flink-job-submitter
+  # Structured Streaming driver. Unlike the old one-shot flink-job-submitter,
+  # spark-submit in client mode blocks for the life of the job (the container
+  # IS the driver), so this restarts if it dies rather than running once.
+  spark-streaming:
+    <<: *spark-common
+    container_name: spark-streaming
+    volumes:
+      - ./spark_streaming/jobs:/opt/spark/jobs
+      - spark-checkpoints:/opt/spark/checkpoints
     depends_on:
-      - flink-jobmanager
-      - flink-taskmanager
-      - eventsim
-    restart: "no"
-    environment:
-      FLINK_DETACHED: "true"
-    entrypoint: ["/bin/bash", "-c"]
+      spark-master:
+        condition: service_started
+      spark-worker:
+        condition: service_started
+      eventsim:
+        condition: service_started
+    restart: unless-stopped
+    # cores.max=2 caps this job to half the cluster (2 workers x 2 cores = 4
+    # total) so the separate dbt-spark batch job isn't left waiting on slots.
     command:
-      - |
-        JM=http://flink-jobmanager:8081
-        echo "Waiting for JobManager and >=3 free task slots (parallelism 3)..."
-        while true; do
-          SLOTS=$$(wget -qO- "$$JM/overview" 2>/dev/null | sed -n 's/.*"slots-available":\([0-9]*\).*/\1/p')
-          [ "$${SLOTS:-0}" -ge 3 ] 2>/dev/null && break
-          sleep 3
-        done
-        if wget -qO- "$$JM/jobs/overview" 2>/dev/null | grep -q '"state":"RUNNING"'; then
-          echo "A Flink job is already RUNNING; skipping submit."
-          exit 0
-        fi
-        echo "Submitting stream_events.py (detached)..."
-        flink run -d -m flink-jobmanager:8081 -py /opt/flink/jobs/stream_events.py
-        echo "Job submitted."
-
-  # Manual alternative:
-  # docker exec -it flink-jobmanager flink run -py /opt/flink/jobs/stream_events.py
+      - spark-submit
+      - --master
+      - spark://spark-master:7077
+      - --conf
+      - spark.cores.max=2
+      - /opt/spark/jobs/stream_events.py
 
   # postgres:
   #   image: postgres:14.18
@@ -254,7 +247,8 @@ services:
       - my-network
 
   # Per-container CPU / memory / disk (filesystem + I/O) metrics on :8080,
-  # covering the Flink job/task managers and everything else in the stack.
+  # covering the Spark master/worker/streaming containers and everything else
+  # in the stack.
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.49.1
     hostname: cadvisor
@@ -285,7 +279,6 @@ services:
     depends_on:
       - kafka-exporter
       - cadvisor
-      - flink-jobmanager
     networks:
       - my-network
 
@@ -310,7 +303,9 @@ services:
 
 networks:
   my-network:
+    name: lakehouse-network
 
 volumes:
   prometheus-data:
   grafana-data:
+  spark-checkpoints:

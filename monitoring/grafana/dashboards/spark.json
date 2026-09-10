@@ -1,0 +1,88 @@
+{
+  "uid": "streamify-spark",
+  "title": "Streamify - Spark",
+  "tags": ["streamify", "spark"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "JVM heap used (master / worker / driver)",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "metrics_jvm_heap_used_Value{job=\"spark-master\"}",
+          "legendFormat": "master"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "metrics_jvm_heap_used_Value{job=\"spark-worker\"}",
+          "legendFormat": "worker"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "{__name__=~\".*_driver_jvm_heap_used_Value\", job=\"spark-streaming\"}",
+          "legendFormat": "driver"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Structured Streaming - input rows/sec",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "{__name__=~\".*_driver_spark_streaming_.*_inputRate.*_Value\"}",
+          "legendFormat": "{{__name__}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Structured Streaming - processing time (ms/batch)",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 9 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "{__name__=~\".*_driver_spark_streaming_.*processingRate.*_Value\"}",
+          "legendFormat": "{{__name__}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Driver JVM CPU time (cumulative, since driver start)",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "{__name__=~\".*_driver_JVMCPU_jvmCpuTime_Value\"} / 1e9",
+          "legendFormat": "driver"
+        }
+      ]
+    }
+  ]
+}

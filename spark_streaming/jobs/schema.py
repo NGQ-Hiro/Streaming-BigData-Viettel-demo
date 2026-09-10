@@ -1,0 +1,90 @@
+from pyspark.sql.types import (
+    StructType,
+    StructField,
+    StringType,
+    DoubleType,
+    LongType,
+    IntegerType,
+    BooleanType,
+)
+
+# Ported verbatim (field names/order) from the old flink_streaming/jobs/schema.py,
+# just with STRING/DOUBLE/BIGINT/INT/BOOLEAN mapped to PySpark types.
+_TYPES = {
+    'STRING': StringType(),
+    'DOUBLE': DoubleType(),
+    'BIGINT': LongType(),
+    'INT': IntegerType(),
+    'BOOLEAN': BooleanType(),
+}
+
+_FIELDS = {
+    'listen_events': [
+        ('artist',        'STRING'),
+        ('song',          'STRING'),
+        ('duration',      'DOUBLE'),
+        ('ts',            'BIGINT'),
+        ('sessionid',     'INT'),
+        ('auth',          'STRING'),
+        ('level',         'STRING'),
+        ('itemInSession', 'INT'),
+        ('city',          'STRING'),
+        ('zip',           'INT'),
+        ('state',         'STRING'),
+        ('userAgent',     'STRING'),
+        ('lon',           'DOUBLE'),
+        ('lat',           'DOUBLE'),
+        ('userId',        'BIGINT'),
+        ('lastName',      'STRING'),
+        ('firstName',     'STRING'),
+        ('gender',        'STRING'),
+        ('registration',  'BIGINT'),
+    ],
+    'page_view_events': [
+        ('ts',            'BIGINT'),
+        ('sessionId',     'INT'),
+        ('page',          'STRING'),
+        ('auth',          'STRING'),
+        ('method',        'STRING'),
+        ('status',        'INT'),
+        ('level',         'STRING'),
+        ('itemInSession', 'INT'),
+        ('city',          'STRING'),
+        ('zip',           'INT'),
+        ('state',         'STRING'),
+        ('userAgent',     'STRING'),
+        ('lon',           'DOUBLE'),
+        ('lat',           'DOUBLE'),
+        ('userId',        'INT'),
+        ('lastName',      'STRING'),
+        ('firstName',     'STRING'),
+        ('gender',        'STRING'),
+        ('registration',  'BIGINT'),
+        ('artist',        'STRING'),
+        ('song',          'STRING'),
+        ('duration',      'DOUBLE'),
+    ],
+    'auth_events': [
+        ('ts',            'BIGINT'),
+        ('sessionId',     'INT'),
+        ('level',         'STRING'),
+        ('itemInSession', 'INT'),
+        ('city',          'STRING'),
+        ('zip',           'INT'),
+        ('state',         'STRING'),
+        ('userAgent',     'STRING'),
+        ('lon',           'DOUBLE'),
+        ('lat',           'DOUBLE'),
+        ('userId',        'INT'),
+        ('lastName',      'STRING'),
+        ('firstName',     'STRING'),
+        ('gender',        'STRING'),
+        ('registration',  'BIGINT'),
+        ('success',       'BOOLEAN'),
+    ],
+}
+
+SCHEMAS = {
+    topic: StructType([StructField(name, _TYPES[t]) for name, t in fields])
+    for topic, fields in _FIELDS.items()
+}

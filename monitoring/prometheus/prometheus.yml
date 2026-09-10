@@ -8,30 +8,37 @@ scrape_configs:
       - targets: ['localhost:9090']
 
   # Kafka consumer-group lag, broker and topic metrics.
+  # Note: Spark Structured Streaming tracks its own offsets via checkpoint
+  # files, not Kafka consumer groups, so the Grafana "Kafka Lag" dashboard
+  # will show no data for the spark-streaming job. Expected, not a bug.
   - job_name: kafka
     static_configs:
       - targets: ['kafka-exporter:9308']
 
-  # Flink JVM (CPU/memory) and per-operator record throughput. The
-  # PrometheusReporter serves metrics on 9249 in each Flink container.
-  - job_name: flink-jobmanager
+  # Native Spark Prometheus metrics (spark.ui.prometheus.enabled, no exporter).
+  - job_name: spark-master
+    metrics_path: /metrics/master/prometheus
     static_configs:
-      - targets: ['flink-jobmanager:9249']
-        labels:
-          role: jobmanager
+      - targets: ['spark-master:8080']
 
-  # TaskManagers run as multiple replicas sharing one service name, so use DNS
-  # A-record discovery to scrape every replica (a static target catches only one).
-  - job_name: flink-taskmanager
-    dns_sd_configs:
-      - names: ['flink-taskmanager']
-        type: A
-        port: 9249
-    relabel_configs:
-      - target_label: role
-        replacement: taskmanager
+  # Only reaches one of the 2 worker replicas (Docker DNS round-robin); fine for a demo.
+  - job_name: spark-worker
+    metrics_path: /metrics/worker/prometheus
+    static_configs:
+      - targets: ['spark-worker:8081']
+
+  - job_name: spark-streaming
+    metrics_path: /metrics/prometheus
+    static_configs:
+      - targets: ['spark-streaming:4040']
 
   # Per-container CPU / memory / disk from cAdvisor.
   - job_name: cadvisor
     static_configs:
       - targets: ['cadvisor:8080']
+
+  # MinIO cluster metrics (exposed with no auth via MINIO_PROMETHEUS_AUTH_TYPE=public).
+  - job_name: minio
+    metrics_path: /minio/v2/metrics/cluster
+    static_configs:
+      - targets: ['minio:9000']

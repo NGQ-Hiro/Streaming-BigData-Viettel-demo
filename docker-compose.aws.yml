@@ -1,0 +1,20 @@
+# AWS deployment override. Use together with the base compose file only:
+#   docker compose -f docker-compose.yml -f docker-compose.aws.yml up -d
+# Do NOT combine with docker-compose.dev.yml (that adds MinIO/REST-catalog
+# containers, which this mode replaces with S3 + Glue).
+#
+# Reads AWS_REGION / S3_WAREHOUSE_BUCKET / GLUE_DATABASE from a .env file or
+# shell env at `docker compose` invocation time (see env.aws.example - named
+# without a leading dot due to a sandbox write restriction on ./.env.*;
+# rename to .env.aws.example if convenient).
+#
+# NOTE: the dbt service lives in dbt/docker-compose.yml (owned separately).
+# The same three env vars (plus ICEBERG_CATALOG_TYPE=glue) need exporting
+# into that container/shell too when running dbt in AWS mode - not done here.
+services:
+  spark-streaming:
+    environment:
+      ICEBERG_CATALOG_TYPE: glue
+      AWS_REGION: ${AWS_REGION}
+      S3_WAREHOUSE_BUCKET: ${S3_WAREHOUSE_BUCKET}
+      GLUE_DATABASE: staging

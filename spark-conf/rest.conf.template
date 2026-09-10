@@ -1,0 +1,44 @@
+# dev: Iceberg REST catalog (apache/iceberg-rest-fixture) backed by MinIO.
+spark.scheduler.mode=FAIR
+spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+spark.sql.catalog.spark_catalog=org.apache.iceberg.spark.SparkSessionCatalog
+spark.sql.catalog.spark_catalog.io-impl=org.apache.iceberg.aws.s3.S3FileIO
+spark.sql.catalog.spark_catalog.type=rest
+spark.sql.catalog.spark_catalog.uri=http://iceberg-rest:8181
+spark.sql.catalog.spark_catalog.warehouse=s3://lakehouse/warehouse
+spark.sql.catalog.spark_catalog.s3.endpoint=http://minio:9000
+spark.sql.catalog.spark_catalog.s3.path-style-access=true
+spark.sql.catalog.spark_catalog.s3.access-key-id=minioadmin
+spark.sql.catalog.spark_catalog.s3.secret-access-key=minioadmin
+spark.sql.catalog.spark_catalog.client.region=us-east-1
+
+# Plain (non-session-wrapped) alias onto the same REST catalog. Needed
+# because SparkSessionCatalog.createNamespace always delegates to Spark's
+# built-in in-memory session catalog, never to the REST backend it wraps —
+# so CREATE DATABASE against spark_catalog never actually reaches the REST
+# server. Namespace ops go through this "iceberg" alias instead; table ops
+# stay on spark_catalog (its CREATE TABLE ... USING iceberg does reach REST).
+spark.sql.catalog.iceberg=org.apache.iceberg.spark.SparkCatalog
+spark.sql.catalog.iceberg.io-impl=org.apache.iceberg.aws.s3.S3FileIO
+spark.sql.catalog.iceberg.type=rest
+spark.sql.catalog.iceberg.uri=http://iceberg-rest:8181
+spark.sql.catalog.iceberg.warehouse=s3://lakehouse/warehouse
+spark.sql.catalog.iceberg.s3.endpoint=http://minio:9000
+spark.sql.catalog.iceberg.s3.path-style-access=true
+spark.sql.catalog.iceberg.s3.access-key-id=minioadmin
+spark.sql.catalog.iceberg.s3.secret-access-key=minioadmin
+spark.sql.catalog.iceberg.client.region=us-east-1
+
+spark.sql.session.timeZone=UTC
+
+# Native Spark Prometheus metrics (built into Spark 3.5.3, no exporter needed).
+# JvmSource isn't registered by default -- without it, the Grafana "JVM heap
+# used" panel has no metric to query (source, not sink, so it's a separate line).
+spark.ui.prometheus.enabled=true
+spark.metrics.conf.*.source.jvm.class=org.apache.spark.metrics.source.JvmSource
+spark.metrics.conf.*.sink.prometheusServlet.class=org.apache.spark.metrics.sink.PrometheusServlet
+spark.metrics.conf.*.sink.prometheusServlet.path=/metrics/prometheus
+spark.metrics.conf.master.sink.prometheusServlet.path=/metrics/master/prometheus
+spark.metrics.conf.worker.sink.prometheusServlet.path=/metrics/worker/prometheus
+spark.metrics.conf.applications.sink.prometheusServlet.path=/metrics/applications/prometheus
+spark.sql.streaming.metricsEnabled=true

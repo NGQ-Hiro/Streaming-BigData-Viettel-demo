@@ -1,9 +1,24 @@
 services:
   dbt:
     container_name: dbt_container
-    image: ghcr.io/dbt-labs/dbt-snowflake:1.8.2
+    # Build context is the repo root (not .) so the Dockerfile can COPY the
+    # shared entrypoint.sh / spark-conf/ templates that live there.
+    build:
+      context: ..
+      dockerfile: dbt/Dockerfile
     volumes:
       - ./my_project:/usr/app
       - .:/root/.dbt
     working_dir: /usr/app
-    command: docs generate
+    networks:
+      - my-network
+    # Manually-triggered batch job, not a long-running service. Default here
+    # does a full gold rebuild; override examples:
+    #   docker compose run dbt bash -c "dbt deps && dbt docs generate"
+    #   docker compose run dbt bash -c "dbt deps && dbt seed"
+    command: ["bash", "-c", "dbt deps && dbt run"]
+
+networks:
+  my-network:
+    external: true
+    name: lakehouse-network

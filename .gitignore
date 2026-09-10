@@ -47,12 +47,19 @@ slide/*.run.xml
 
 spark_streaming/*
 !spark_streaming/jobs
+!spark_streaming/Dockerfile
 
 dbt/*
 !dbt/my_project
 !dbt/docker-compose.yml
+!dbt/Dockerfile
 
 postgres
 airflow.env
 airflow/*
 !airflow/dags
+
+
+**/.env
+**/.claude/
+**/graphify-out/
