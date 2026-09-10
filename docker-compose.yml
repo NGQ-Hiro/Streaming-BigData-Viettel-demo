@@ -154,17 +154,24 @@ services:
   spark-worker:
     <<: *spark-common
     command: ["spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
+    # Executors run inside these worker containers in standalone mode, so a
+    # file path only readable on the driver (e.g. -v mount on a one-off
+    # `docker compose run`) isn't enough for file-based reads (CSV, etc.) --
+    # every worker needs the same path. Read-only: this is input data, not
+    # written back here.
+    volumes:
+      - ./dbt/my_project/seeds:/seeds:ro
     depends_on:
       - spark-master
     deploy:
-      replicas: 2
+      replicas: 3
     environment:
       SPARK_WORKER_CORES: 2
       SPARK_WORKER_MEMORY: 2g
-    # Range form so each of the 2 replicas gets its own host port (a fixed
-    # single mapping would collide on the second replica).
+    # Range form so each replica gets its own host port (a fixed single
+    # mapping would collide across replicas).
     ports:
-      - "8087-8088:8081"
+      - "8087-8089:8081"
 
   # Structured Streaming driver. Unlike the old one-shot flink-job-submitter,
   # spark-submit in client mode blocks for the life of the job (the container
@@ -192,6 +199,63 @@ services:
       - --conf
       - spark.cores.max=2
       - /opt/spark/jobs/stream_events.py
+
+  # Long-running Spark Thrift Server: lets dbt (method: thrift) submit SQL
+  # onto the real spark-master cluster instead of a local in-process
+  # SparkSession, so it shares the same worker pool as spark-streaming.
+  # cores.max=2 leaves the 3rd worker's 2 cores as headroom (6 total,
+  # streaming takes 2, this takes 2).
+  spark-thrift:
+    <<: *spark-common
+    container_name: spark-thrift
+    depends_on:
+      spark-master:
+        condition: service_started
+      spark-worker:
+        condition: service_started
+    restart: unless-stopped
+    ports:
+      - "10000:10000"
+    command:
+      - spark-submit
+      - --class
+      - org.apache.spark.sql.hive.thriftserver.HiveThriftServer2
+      - --master
+      - spark://spark-master:7077
+      - --conf
+      - spark.cores.max=2
+      # dbt-spark's thrift method has no catalog concept (no USE CATALOG issued
+      # per session) -- unqualified schema refs (SHOW TABLES IN dim, etc.) hit
+      # whatever Spark's default catalog is. spark_catalog only forwards TABLE
+      # ops to REST, not namespace ops (see the "iceberg" alias comment above),
+      # so leaving the default at spark_catalog breaks dbt's schema checks.
+      # Scoped to just this service -- spark-streaming keeps spark_catalog default.
+      - --conf
+      - spark.sql.defaultCatalog=iceberg
+      - --hiveconf
+      - hive.server2.thrift.port=10000
+      - --hiveconf
+      - hive.server2.thrift.bind.host=0.0.0.0
+
+  # Superset: BI dashboards, queries spark-thrift via its HiveServer2 SQLAlchemy
+  # dialect (see superset/README.md for the connection URI). Replaces the old
+  # Power BI setup; uses its bundled SQLite metadata DB, no separate Postgres.
+  superset:
+    build:
+      context: ./superset
+    hostname: superset
+    container_name: superset
+    ports:
+      - "8888:8088"
+    environment:
+      # Dev-only placeholder. Must be replaced with a real secret for any
+      # non-local deployment.
+      SUPERSET_SECRET_KEY: dev-only-secret-key
+    depends_on:
+      spark-thrift:
+        condition: service_started
+    networks:
+      - my-network
 
   # postgres:
   #   image: postgres:14.18

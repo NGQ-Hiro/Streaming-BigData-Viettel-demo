@@ -12,7 +12,7 @@ FROM
     FROM
     (
         -- Find the earliest date available for each free/paid status change
-        SELECT userId, firstName, lastName, gender, registration, level, grouped, cast(min(date) as date) as minDate
+        SELECT userId, firstName, lastName, gender, registration, level, grouped, cast(timestamp_millis(min(date)) as date) as minDate
         FROM
         -- Create distinct group of each level change to identify the change in level accurately
         (

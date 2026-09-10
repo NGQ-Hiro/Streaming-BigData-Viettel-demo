@@ -26,9 +26,9 @@ clean-targets:         # directories to be removed by `dbt clean`
 # Iceberg tables directly in the shared SparkSessionCatalog, so no more
 # per-table CREATE TABLE ... LOCATION registration here.
 on-run-start:
-  - "CREATE DATABASE IF NOT EXISTS staging"
-  - "CREATE DATABASE IF NOT EXISTS analytics"
-  - "CREATE DATABASE IF NOT EXISTS dim"
+  - "CREATE DATABASE IF NOT EXISTS iceberg.staging"
+  - "CREATE DATABASE IF NOT EXISTS iceberg.analytics"
+  - "CREATE DATABASE IF NOT EXISTS iceberg.dim"
 
 # Configuring models
 # Full documentation: https://docs.getdbt.com/docs/configuring-models
@@ -53,8 +53,8 @@ models:
 
 seeds:
   my_project:
-    +schema: STAGING
+    +schema: staging
     songs:
-      +schema: STAGING
+      +schema: staging
     state_codes:
-      +schema: STAGING
+      +schema: staging

@@ -63,3 +63,4 @@ airflow/*
 **/.env
 **/.claude/
 **/graphify-out/
+**/metastore_db/

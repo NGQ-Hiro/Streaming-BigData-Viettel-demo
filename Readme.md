@@ -59,7 +59,7 @@ The project follows a modern data stack (ELT) architecture, composed of nine lay
 4.  **Cloud Data Warehouse (Snowflake):** **Snowflake** serves as the central data warehouse, providing a scalable "single source of truth" for all processed data from Flink.
 5.  **Data Transformation (dbt):** Once the data is in Snowflake, **dbt** runs transformation jobs to convert it into a clean, analytics-ready **star schema**.
 6.  **Orchestration (Airflow):** **Apache Airflow** manages the workflow, orchestrating the dbt transformations on a daily schedule.
-7.  **Business Intelligence (Power BI):** **Power BI** connects to Snowflake, consuming the clean data from the star schema to visualize insights through interactive dashboards.
+7.  **Business Intelligence (Apache Superset):** **Apache Superset** connects to the **Spark Thrift Server** (HiveServer2-compatible), consuming the clean data from the star schema to visualize insights through interactive dashboards.
 8.  **Monitoring (Prometheus & Grafana):** **Prometheus** scrapes metrics from Flink's built-in reporter and kafka-exporter. **Grafana** visualizes Kafka consumer-group lag, Flink record throughput, and per-TaskManager CPU and memory across three dashboards.
 
 ---
@@ -89,7 +89,7 @@ This project uses dbt to manage and execute two main types of data models in Sno
 
 ## 📊 Results Dashboard
 
-Visualizations are created in Power BI, connected directly to the star schema models in Snowflake.
+Visualizations are created in Apache Superset, connected directly via the Spark Thrift Server to the star schema models.
 
 <p align="center"\>
   <img src="image/dashboard.png" alt="Streamify Dashboard" width="700"/\>

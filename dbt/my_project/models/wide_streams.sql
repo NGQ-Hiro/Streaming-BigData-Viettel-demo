@@ -20,6 +20,7 @@ SELECT
 
     dim_locations.city AS city,
     dim_locations.stateName AS state,
+    dim_locations.stateCode AS stateCode,
     dim_locations.latitude AS latitude,
     dim_locations.longitude AS longitude,
 
