@@ -55,6 +55,38 @@
           "legendFormat": "{{consumergroup}} / {{topic}}"
         }
       ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Under-replicated partitions (broker health)",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "kafka_topic_partition_under_replicated_partition",
+          "legendFormat": "{{topic}} p{{partition}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Brokers up",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 18 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "kafka_brokers",
+          "legendFormat": "brokers"
+        }
+      ]
     }
   ]
 }

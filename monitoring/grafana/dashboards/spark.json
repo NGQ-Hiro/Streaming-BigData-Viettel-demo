@@ -6,15 +6,16 @@
   "schemaVersion": 39,
   "version": 1,
   "refresh": "10s",
-  "time": { "from": "now-30m", "to": "now" },
+  "time": { "from": "now-10m", "to": "now" },
   "panels": [
     {
       "id": 1,
       "type": "timeseries",
       "title": "JVM heap used (master / worker / driver)",
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "calcs": ["last"] } },
       "targets": [
         {
           "refId": "A",
@@ -25,62 +26,138 @@
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "metrics_jvm_heap_used_Value{job=\"spark-worker\"}",
-          "legendFormat": "worker"
+          "expr": "label_replace(metrics_jvm_heap_used_Value{job=\"spark-worker\"}, \"worker\", \"$1\", \"instance\", \".*-spark-worker-([0-9]+):.*\")",
+          "legendFormat": "worker {{worker}}"
         },
         {
           "refId": "C",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "{__name__=~\".*_driver_jvm_heap_used_Value\", job=\"spark-streaming\"}",
-          "legendFormat": "driver"
+          "expr": "label_replace({__name__=~\".*_driver_jvm_heap_used_Value\", job=~\"spark-streaming|spark-thrift\"}, \"app\", \"$1\", \"__name__\", \"metrics_app_([0-9]+_[0-9]+)_driver_jvm_heap_used_Value\")",
+          "legendFormat": "{{job}} driver ({{app}})"
         }
       ]
     },
     {
       "id": 2,
       "type": "timeseries",
-      "title": "Structured Streaming - input rows/sec",
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 9 },
+      "title": "Structured Streaming - input rows/sec (by topic)",
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 7 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last"] } },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "{__name__=~\".*_driver_spark_streaming_.*_inputRate.*_Value\"}",
-          "legendFormat": "{{__name__}}"
+          "expr": "label_replace({__name__=~\".*_driver_spark_streaming_.*_inputRate_total_Value\"}, \"query\", \"$1\", \"__name__\", \".*_driver_spark_streaming_(.*)_inputRate_total_Value\")",
+          "legendFormat": "{{query}}"
         }
       ]
     },
     {
       "id": 3,
       "type": "timeseries",
-      "title": "Structured Streaming - processing time (ms/batch)",
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 9 },
+      "title": "Structured Streaming - processing rate (rows/sec, by topic)",
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 7 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last"] } },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "{__name__=~\".*_driver_spark_streaming_.*processingRate.*_Value\"}",
-          "legendFormat": "{{__name__}}"
+          "expr": "label_replace({__name__=~\".*_driver_spark_streaming_.*_processingRate_total_Value\"}, \"query\", \"$1\", \"__name__\", \".*_driver_spark_streaming_(.*)_processingRate_total_Value\")",
+          "legendFormat": "{{query}}"
         }
       ]
     },
     {
-      "id": 4,
+      "id": 7,
       "type": "timeseries",
-      "title": "Driver JVM CPU time (cumulative, since driver start)",
-      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 18 },
+      "title": "Structured Streaming - end-to-end batch latency (ms, by topic)",
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 7 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last"] } },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "{__name__=~\".*_driver_JVMCPU_jvmCpuTime_Value\"} / 1e9",
-          "legendFormat": "driver"
+          "expr": "label_replace({__name__=~\".*_driver_spark_streaming_.*_latency_Value\"}, \"query\", \"$1\", \"__name__\", \".*_driver_spark_streaming_(.*)_latency_Value\")",
+          "legendFormat": "{{query}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Cluster health - alive workers / running apps",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "metrics_master_aliveWorkers_Value",
+          "legendFormat": "alive workers"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "metrics_master_apps_Value",
+          "legendFormat": "running apps"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "metrics_master_waitingApps_Value",
+          "legendFormat": "waiting apps"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Driver failed stages",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "label_replace({__name__=~\".*_driver_DAGScheduler_stage_failedStages_Value\"}, \"app\", \"$1\", \"__name__\", \"metrics_app_([0-9]+_[0-9]+)_driver_DAGScheduler_stage_failedStages_Value\")",
+          "legendFormat": "driver ({{app}})"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Worker resource usage (cores / executors, by worker)",
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 21 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["last"] } },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "label_replace(metrics_worker_coresUsed_Value, \"worker\", \"$1\", \"instance\", \".*-spark-worker-([0-9]+):.*\")",
+          "legendFormat": "worker {{worker}} cores used"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "label_replace(metrics_worker_coresFree_Value, \"worker\", \"$1\", \"instance\", \".*-spark-worker-([0-9]+):.*\")",
+          "legendFormat": "worker {{worker}} cores free"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "label_replace(metrics_worker_executors_Value, \"worker\", \"$1\", \"instance\", \".*-spark-worker-([0-9]+):.*\")",
+          "legendFormat": "worker {{worker}} executors"
         }
       ]
     }

@@ -21,16 +21,28 @@ scrape_configs:
     static_configs:
       - targets: ['spark-master:8080']
 
-  # Only reaches one of the 2 worker replicas (Docker DNS round-robin); fine for a demo.
+  # Targets each worker replica's container name directly -- 'spark-worker:8081'
+  # DNS round-robins to only one of the 3 replicas, so listing them individually
+  # is required to see all workers.
   - job_name: spark-worker
     metrics_path: /metrics/worker/prometheus
     static_configs:
-      - targets: ['spark-worker:8081']
+      - targets:
+          - streaming-bigdata-viettel-demo-spark-worker-1:8081
+          - streaming-bigdata-viettel-demo-spark-worker-2:8081
+          - streaming-bigdata-viettel-demo-spark-worker-3:8081
 
   - job_name: spark-streaming
     metrics_path: /metrics/prometheus
     static_configs:
       - targets: ['spark-streaming:4040']
+
+  # HiveThriftServer2 (dbt + Superset query engine) -- was previously invisible
+  # to monitoring entirely.
+  - job_name: spark-thrift
+    metrics_path: /metrics/prometheus
+    static_configs:
+      - targets: ['spark-thrift:4040']
 
   # Per-container CPU / memory / disk from cAdvisor.
   - job_name: cadvisor

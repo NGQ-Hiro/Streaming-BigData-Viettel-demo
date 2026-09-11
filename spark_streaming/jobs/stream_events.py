@@ -161,6 +161,7 @@ def main():
         df = build_stream(spark, topic, decode_strings)
         (
             df.writeStream
+            .queryName(topic)
             .foreachBatch(lambda batch_df, batch_id, topic=topic: _write_batch(topic, batch_df, batch_id))
             .outputMode("append")
             # ponytail: no partitionBy — add partitionBy("year_", "month_", "day_")
