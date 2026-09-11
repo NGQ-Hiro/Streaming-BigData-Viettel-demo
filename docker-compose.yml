@@ -196,6 +196,11 @@ services:
   spark-thrift:
     <<: *spark-common
     container_name: spark-thrift
+    volumes:
+      # Lets the songs-seed on-run-start hook (dbt_project.yml) read the CSV
+      # straight off disk via the driver -- no separate spark-submit job/app
+      # needed, so no extra cluster cores to free up.
+      - ./dbt/my_project/seeds:/seeds:ro
     depends_on:
       spark-master:
         condition: service_started

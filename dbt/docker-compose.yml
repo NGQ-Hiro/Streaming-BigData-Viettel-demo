@@ -16,9 +16,9 @@ services:
     # does a full gold rebuild; override examples:
     #   docker compose run dbt bash -c "dbt deps && dbt docs generate"
     #   docker compose run dbt bash -c "dbt deps && dbt seed"
-    # songs.csv (10k rows) is loaded separately via spark_streaming/jobs/load_songs_seed.py
-    # (spark-submit against the cluster, see that file's docstring) -- dbt seed
-    # only handles state_codes.csv (58 rows, fine as an inline SQL literal).
+    # songs.csv (10k rows) is loaded by an on-run-start hook in dbt_project.yml
+    # (reads the CSV as a file source via spark-thrift, not a `dbt seed`) --
+    # dbt seed only handles state_codes.csv (58 rows, fine as an inline SQL literal).
     command: ["bash", "-c", "dbt deps && dbt seed --select state_codes && dbt run --no-populate-cache"]
 
 networks:

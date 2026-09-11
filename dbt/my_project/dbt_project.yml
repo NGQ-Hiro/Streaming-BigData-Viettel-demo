@@ -22,12 +22,18 @@ clean-targets:         # directories to be removed by `dbt clean`
   - "target"
   - "dbt_packages"
 
-# Just creates the databases the models below live in -- the streaming job
-# owns creating the bronze Hudi tables themselves.
+# Creates the databases the models below live in (the streaming job owns
+# creating the bronze Hudi tables itself), then loads the songs seed
+# (10k rows -- too many for a plain `dbt seed`, whose inline-VALUES compile
+# is near-quadratic in Catalyst; reading the CSV as a file source instead
+# stays fast at any row count). IF NOT EXISTS makes this a no-op after the
+# first run since songs.csv never changes.
 on-run-start:
   - "CREATE DATABASE IF NOT EXISTS staging"
   - "CREATE DATABASE IF NOT EXISTS analytics"
   - "CREATE DATABASE IF NOT EXISTS dim"
+  - "CREATE TEMPORARY VIEW songs_seed_raw USING csv OPTIONS (path 'file:///seeds/songs.csv', header 'true', inferSchema 'true')"
+  - "CREATE TABLE IF NOT EXISTS staging.songs USING hudi TBLPROPERTIES (type = 'cow', primaryKey = 'song_id', preCombineField = 'song_id') LOCATION 's3a://lakehouse/staging/songs' AS SELECT * FROM songs_seed_raw"
 
 # Configuring models
 # Full documentation: https://docs.getdbt.com/docs/configuring-models
@@ -58,7 +64,11 @@ seeds:
   my_project:
     +schema: staging
     +file_format: hudi
-    songs:
-      +schema: staging
+    # Without an explicit LOCATION, dbt-spark's seed CREATE TABLE lands in the
+    # local-disk default warehouse dir, whose parent path doesn't exist yet --
+    # Hudi's metadata-table bootstrap then throws FileNotFoundException trying
+    # to list it. The songs CTAS hook avoids this via its own explicit
+    # LOCATION; location_root does the same for a seed.
+    +location_root: 's3a://lakehouse/staging'
     state_codes:
       +schema: staging

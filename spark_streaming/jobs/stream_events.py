@@ -23,7 +23,7 @@ CHECKPOINT_ROOT = "/opt/spark/checkpoints"
 # Spark's own checkpoint remains the source of truth for resuming the stream.
 CONSUMER_GROUP_PREFIX = "streamify"
 
-_WAREHOUSE = "s3a://lakehouse/warehouse"
+_WAREHOUSE = "s3a://lakehouse"
 
 # (topic, decode latin1-mojibake on artist/song)
 TOPICS = [
