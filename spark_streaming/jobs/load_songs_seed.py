@@ -1,6 +1,6 @@
 """
 One-off bulk load of dbt/my_project/seeds/songs.csv (10k rows) straight into
-Iceberg via a real spark-submit job on the cluster. dbt seed compiles each
+Hudi via a real spark-submit job on the cluster. dbt seed compiles each
 row into an inline SQL VALUES literal, and Spark's Catalyst analyzer is
 near-quadratic on that -- fine for state_codes.csv (58 rows, still a dbt
 seed) but never finishes in practical time for 10k rows, on any driver
@@ -19,9 +19,23 @@ from pyspark.sql import SparkSession
 csv_path = sys.argv[1] if len(sys.argv) > 1 else "/seeds/songs.csv"
 
 spark = SparkSession.builder.appName("load-songs-seed").getOrCreate()
-spark.sql("CREATE DATABASE IF NOT EXISTS iceberg.staging")
+spark.sql("CREATE DATABASE IF NOT EXISTS staging")
 
 df = spark.read.option("header", True).option("inferSchema", True).csv(csv_path)
-df.writeTo("spark_catalog.staging.songs").createOrReplace()
+
+path = "s3a://lakehouse/warehouse/staging/songs"
+(
+    df.write.format("hudi")
+    .options(**{
+        "hoodie.table.name": "songs",
+        "hoodie.datasource.write.table.type": "COPY_ON_WRITE",
+        "hoodie.datasource.write.recordkey.field": "song_id",
+        "hoodie.datasource.write.precombine.field": "song_id",
+        "hoodie.datasource.write.operation": "insert_overwrite_table",
+    })
+    .mode("append")
+    .save(path)
+)
+spark.sql(f"CREATE TABLE IF NOT EXISTS staging.songs USING hudi LOCATION '{path}'")
 
 print(f"loaded {df.count()} rows into staging.songs")

@@ -1,19 +1,13 @@
 """
 Spark Structured Streaming job: Kafka -> latin1-decode + derived time columns
--> Iceberg bronze (staging.<topic>, catalog-managed, no raw s3a:// path).
+-> Hudi bronze (staging.<topic>, MERGE_ON_READ tables under s3a://lakehouse).
 Replaces the old Flink SQL job; keeps the exact same bronze column names
 (ts_timestamp, year_, month_, day_, hour_, processed_time) since the
 separate dbt-spark batch job depends on this schema.
 """
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
-from pyspark.sql.types import (
-    StringType,
-    DoubleType,
-    LongType,
-    IntegerType,
-    BooleanType,
-)
+from pyspark.sql.types import StringType
 
 from schema import SCHEMAS
 
@@ -29,30 +23,7 @@ CHECKPOINT_ROOT = "/opt/spark/checkpoints"
 # Spark's own checkpoint remains the source of truth for resuming the stream.
 CONSUMER_GROUP_PREFIX = "streamify"
 
-# Iceberg's streaming sink doesn't auto-create tables (unlike Delta) --
-# these build the CREATE TABLE DDL from SCHEMAS[topic] below.
-_SQL_TYPE = {
-    StringType: "STRING",
-    DoubleType: "DOUBLE",
-    LongType: "BIGINT",
-    IntegerType: "INT",
-    BooleanType: "BOOLEAN",
-}
-
-_DERIVED_COLUMNS = [
-    ("ts_timestamp", "TIMESTAMP"),
-    ("year_", "INT"),
-    ("month_", "INT"),
-    ("day_", "INT"),
-    ("hour_", "INT"),
-    ("processed_time", "TIMESTAMP"),
-]
-
-
-def _table_ddl(topic):
-    cols = [f"{f.name} {_SQL_TYPE[type(f.dataType)]}" for f in SCHEMAS[topic].fields]
-    cols += [f"{name} {sql_type}" for name, sql_type in _DERIVED_COLUMNS]
-    return f"CREATE TABLE IF NOT EXISTS staging.{topic} ({', '.join(cols)}) USING iceberg"
+_WAREHOUSE = "s3a://lakehouse/warehouse"
 
 # (topic, decode latin1-mojibake on artist/song)
 TOPICS = [
@@ -105,6 +76,7 @@ def build_stream(spark, topic, decode_strings):
         .withColumn("day_", F.dayofmonth(ts_col))
         .withColumn("hour_", F.hour(ts_col))
         .withColumn("processed_time", F.current_timestamp())
+        .withColumn("_row_key", F.expr("uuid()"))
     )
 
 
@@ -132,40 +104,56 @@ def _commit_offsets(spark, group_id, topic, batch_df):
         admin.close()
 
 
+def _hudi_options(topic):
+    return {
+        "hoodie.table.name": topic,
+        "hoodie.datasource.write.table.type": "MERGE_ON_READ",
+        "hoodie.datasource.write.recordkey.field": "_row_key",
+        "hoodie.datasource.write.precombine.field": "processed_time",
+        "hoodie.datasource.write.operation": "insert",
+        "hoodie.datasource.write.hive_style_partitioning": "true",
+    }
+
+
 def _write_batch(topic, batch_df, batch_id):
     # ponytail: a new AdminClient per microbatch, fine at this demo's batch
     # rate; reuse a driver-side singleton if this ever becomes a bottleneck.
+    path = f"{_WAREHOUSE}/staging/{topic}"
     (
         batch_df.drop("partition", "offset")
-        .writeTo(f"spark_catalog.staging.{topic}")
-        .append()
+        .write.format("hudi")
+        .options(**_hudi_options(topic))
+        .mode("append")
+        .save(path)
     )
-    _commit_offsets(batch_df.sparkSession, f"{CONSUMER_GROUP_PREFIX}-{topic}", topic, batch_df)
+    # Hudi's DataSource writer auto-creates the table at `path` on first
+    # write (unlike Iceberg, which needed an explicit CREATE TABLE before
+    # any data existed) -- this just makes it resolvable by name
+    # (staging.<topic>) for dbt/Superset over the Thrift Server. Schema is
+    # inferred from the Hudi table's own metadata at `path`, so this only
+    # succeeds once data exists there -- safe to repeat every batch since
+    # by now the .save() above has already run at least once.
+    spark = batch_df.sparkSession
+    spark.sql(f"CREATE TABLE IF NOT EXISTS staging.{topic} USING hudi LOCATION '{path}'")
+    _commit_offsets(spark, f"{CONSUMER_GROUP_PREFIX}-{topic}", topic, batch_df)
 
 
 def main():
     spark = SparkSession.builder.appName("bronze-stream").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
 
-    # Namespace must be created through the "iceberg" catalog alias, not
-    # spark_catalog: SparkSessionCatalog.createNamespace always delegates to
-    # Spark's built-in in-memory catalog, never to the real REST/Glue backend
-    # it wraps (confirmed in Iceberg's SparkSessionCatalog.java source) — so
-    # CREATE DATABASE against spark_catalog silently never reaches REST/Glue,
-    # and the later CREATE TABLE ... USING iceberg fails with
-    # NoSuchNamespaceException. See spark-conf/rest.conf.template.
-    spark.sql("CREATE NAMESPACE IF NOT EXISTS iceberg.staging")
+    spark.sql("CREATE DATABASE IF NOT EXISTS staging")
 
     for topic, decode_strings in TOPICS:
-        spark.sql(_table_ddl(topic))
         df = build_stream(spark, topic, decode_strings)
         (
             df.writeStream
             .queryName(topic)
             .foreachBatch(lambda batch_df, batch_id, topic=topic: _write_batch(topic, batch_df, batch_id))
             .outputMode("append")
-            # ponytail: no partitionBy — add partitionBy("year_", "month_", "day_")
-            # if data volume grows enough that small-file/scan cost matters.
+            # ponytail: no partitioning at this data volume -- add
+            # "hoodie.datasource.write.partitionpath.field": "year_,month_,day_"
+            # to _hudi_options() if small-file/scan cost ever matters.
             .option("checkpointLocation", f"{CHECKPOINT_ROOT}/{topic}")
             .start()
         )
@@ -188,10 +176,9 @@ def _self_check():
     fixed = _decode(mojibake)
     assert fixed == "Beyoncé", f"decode broken: got {fixed!r}"
 
-    ddl = _table_ddl("auth_events")
-    assert ddl.startswith("CREATE TABLE IF NOT EXISTS staging.auth_events ("), ddl
-    assert ddl.endswith("success BOOLEAN, ts_timestamp TIMESTAMP, year_ INT, "
-                         "month_ INT, day_ INT, hour_ INT, "
-                         "processed_time TIMESTAMP) USING iceberg"), ddl
+    opts = _hudi_options("auth_events")
+    assert opts["hoodie.table.name"] == "auth_events", opts
+    assert opts["hoodie.datasource.write.recordkey.field"] == "_row_key", opts
+    assert opts["hoodie.datasource.write.precombine.field"] == "processed_time", opts
 
     print("ok")

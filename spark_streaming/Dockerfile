@@ -2,11 +2,10 @@ FROM apache/spark:3.5.3-python3
 
 USER root
 
-# wget fetches the connector/Iceberg jars below (python3 is already bundled).
-# openjdk-17: Iceberg 1.11.0's jars are compiled to class file version 61
-# (Java 17) and won't load on this base image's default Java 11
-# (UnsupportedClassVersionError) -- install 17 alongside and make it the
-# active JAVA_HOME; Spark 3.5.3 itself supports both.
+# wget fetches the connector/Hudi jars below (python3 is already bundled).
+# openjdk-17: Hudi 0.15.0 runs fine on Java 8/11/17 -- kept at 17 (rather than
+# the base image's default 11) since spark-thrift shares this same image and
+# base, no reason to maintain two JDKs.
 RUN apt-get update && \
     apt-get install -y wget openjdk-17-jdk-headless && \
     rm -rf /var/lib/apt/lists/* && \
@@ -20,15 +19,11 @@ ENV PATH="$JAVA_HOME/bin:$SPARK_HOME/bin:$SPARK_HOME/sbin:$PATH"
 # ClassNotFoundException shows up at runtime, check what actually landed with
 # `ls $SPARK_HOME/jars | grep -E 'hadoop-client|scala-library'` and re-pin.
 #
-# Pinned to 3.5.3, not 4.1.0/4.2.0: tried both. Iceberg has no
-# iceberg-spark-runtime built against Spark 4.2's API (View class ->
-# interface change breaks IncompatibleClassChangeError). Spark 4.1 does have
-# a matching iceberg-spark-runtime-4.1_2.13 jar, but as of 1.11.0 that
-# integration is unfinished upstream (25+ open "Spark 4.1" issues in
-# apache/iceberg) — hit a real one: WriteToDataSourceV2Exec.customMetrics NPEs
-# on SparkPlan.session() during streaming-write planning (open PR
-# apache/iceberg#17820, not yet merged). 3.5.3 is Iceberg 1.11.0's actual
-# maintained Spark target. Revisit 4.x once Iceberg's Spark 4.1 support matures.
+# hudi-spark3.5-bundle_2.12:0.15.0 is Hudi's release matching Spark 3.5.x
+# (bundle name pins the Spark line directly). hadoop-aws/aws-java-sdk-bundle
+# versions are pinned to what this Spark distribution's bundled Hadoop client
+# (3.3.4) expects, to avoid classpath conflicts between hadoop-common and
+# hadoop-aws.
 
 # Kafka Structured Streaming source. Versions pinned to what
 # spark-sql-kafka-0-10_2.12:3.5.3's own POM declares as its compile
@@ -43,17 +38,19 @@ RUN wget -q -P $SPARK_HOME/jars \
     https://repo1.maven.org/maven2/org/apache/kafka/kafka-clients/3.4.1/kafka-clients-3.4.1.jar \
     https://repo1.maven.org/maven2/org/apache/commons/commons-pool2/2.11.1/commons-pool2-2.11.1.jar
 
-# Iceberg jars. iceberg-aws-bundle brings S3FileIO (AWS SDK v2), replacing
-# the old s3a:// / hadoop-aws connector — same jar works for both the dev
-# REST catalog (MinIO) and the aws Glue catalog. _2.12 to match the base
-# image's Scala version (see Kafka connector note above).
+# Hudi jars. _2.12 to match the base image's Scala version (see Kafka
+# connector note above). Hudi has no bundled S3 client of its own (unlike
+# Iceberg's S3FileIO) -- it writes through Hadoop's S3A filesystem, so
+# hadoop-aws + the AWS SDK bundle are added here too; same jars work for both
+# the dev MinIO endpoint and real AWS S3.
 RUN wget -q -P $SPARK_HOME/jars \
-    https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.11.0/iceberg-spark-runtime-3.5_2.12-1.11.0.jar \
-    https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-aws-bundle/1.11.0/iceberg-aws-bundle-1.11.0.jar
+    https://repo1.maven.org/maven2/org/apache/hudi/hudi-spark3.5-bundle_2.12/0.15.0/hudi-spark3.5-bundle_2.12-0.15.0.jar \
+    https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar \
+    https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar
 
 # entrypoint.sh renders $SPARK_CONF_DIR/spark-defaults.conf at container
-# start from the template matching $ICEBERG_CATALOG_TYPE (rest for dev, glue
-# for aws) — one image, no rebuild needed to switch catalogs. $SPARK_HOME/conf
+# start from the template matching $LAKE_ENV (rest for dev, glue for aws) —
+# one image, no rebuild needed to switch environments. $SPARK_HOME/conf
 # already exists and is owned by the spark user from the base image.
 ENV SPARK_CONF_DIR=$SPARK_HOME/conf
 

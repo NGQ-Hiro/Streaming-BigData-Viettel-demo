@@ -64,3 +64,4 @@ airflow/*
 **/.claude/
 **/graphify-out/
 **/metastore_db/
+**/__pycache__/

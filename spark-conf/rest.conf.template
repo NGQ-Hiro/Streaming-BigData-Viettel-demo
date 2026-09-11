@@ -1,33 +1,18 @@
-# dev: Iceberg REST catalog (apache/iceberg-rest-fixture) backed by MinIO.
+# dev: Hudi tables on MinIO. No catalog-service quirk to work around with
+# Hudi -- plain Spark session catalog + CREATE TABLE ... USING hudi LOCATION
+# '...' is enough.
 spark.scheduler.mode=FAIR
-spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
-spark.sql.catalog.spark_catalog=org.apache.iceberg.spark.SparkSessionCatalog
-spark.sql.catalog.spark_catalog.io-impl=org.apache.iceberg.aws.s3.S3FileIO
-spark.sql.catalog.spark_catalog.type=rest
-spark.sql.catalog.spark_catalog.uri=http://iceberg-rest:8181
-spark.sql.catalog.spark_catalog.warehouse=s3://lakehouse/warehouse
-spark.sql.catalog.spark_catalog.s3.endpoint=http://minio:9000
-spark.sql.catalog.spark_catalog.s3.path-style-access=true
-spark.sql.catalog.spark_catalog.s3.access-key-id=minioadmin
-spark.sql.catalog.spark_catalog.s3.secret-access-key=minioadmin
-spark.sql.catalog.spark_catalog.client.region=us-east-1
+spark.sql.extensions=org.apache.spark.sql.hudi.HoodieSparkSessionExtension
+spark.serializer=org.apache.spark.serializer.KryoSerializer
 
-# Plain (non-session-wrapped) alias onto the same REST catalog. Needed
-# because SparkSessionCatalog.createNamespace always delegates to Spark's
-# built-in in-memory session catalog, never to the REST backend it wraps —
-# so CREATE DATABASE against spark_catalog never actually reaches the REST
-# server. Namespace ops go through this "iceberg" alias instead; table ops
-# stay on spark_catalog (its CREATE TABLE ... USING iceberg does reach REST).
-spark.sql.catalog.iceberg=org.apache.iceberg.spark.SparkCatalog
-spark.sql.catalog.iceberg.io-impl=org.apache.iceberg.aws.s3.S3FileIO
-spark.sql.catalog.iceberg.type=rest
-spark.sql.catalog.iceberg.uri=http://iceberg-rest:8181
-spark.sql.catalog.iceberg.warehouse=s3://lakehouse/warehouse
-spark.sql.catalog.iceberg.s3.endpoint=http://minio:9000
-spark.sql.catalog.iceberg.s3.path-style-access=true
-spark.sql.catalog.iceberg.s3.access-key-id=minioadmin
-spark.sql.catalog.iceberg.s3.secret-access-key=minioadmin
-spark.sql.catalog.iceberg.client.region=us-east-1
+# MinIO via Hadoop's S3A filesystem (Hudi has no bundled S3 client of its
+# own, unlike Iceberg's S3FileIO -- hadoop-aws jar added in the Dockerfile).
+spark.hadoop.fs.s3a.endpoint=http://minio:9000
+spark.hadoop.fs.s3a.access.key=minioadmin
+spark.hadoop.fs.s3a.secret.key=minioadmin
+spark.hadoop.fs.s3a.path.style.access=true
+spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem
+spark.hadoop.fs.s3a.connection.ssl.enabled=false
 
 spark.sql.session.timeZone=UTC
 

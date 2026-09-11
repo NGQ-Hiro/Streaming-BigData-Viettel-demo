@@ -22,13 +22,12 @@ clean-targets:         # directories to be removed by `dbt clean`
   - "target"
   - "dbt_packages"
 
-# Namespace creation only -- the streaming job now owns creating the bronze
-# Iceberg tables directly in the shared SparkSessionCatalog, so no more
-# per-table CREATE TABLE ... LOCATION registration here.
+# Just creates the databases the models below live in -- the streaming job
+# owns creating the bronze Hudi tables themselves.
 on-run-start:
-  - "CREATE DATABASE IF NOT EXISTS iceberg.staging"
-  - "CREATE DATABASE IF NOT EXISTS iceberg.analytics"
-  - "CREATE DATABASE IF NOT EXISTS iceberg.dim"
+  - "CREATE DATABASE IF NOT EXISTS staging"
+  - "CREATE DATABASE IF NOT EXISTS analytics"
+  - "CREATE DATABASE IF NOT EXISTS dim"
 
 # Configuring models
 # Full documentation: https://docs.getdbt.com/docs/configuring-models
@@ -40,12 +39,16 @@ models:
   my_project:
     # Config indicated by + and applies to all files under models/example/
     +schema: analytics
-    +materialized: table
-    # Gold is a full rebuild every run (no incremental models in this
-    # project) -- `table` + `file_format: iceberg` gives a full overwrite
-    # each `dbt run`. Table location is managed by the catalog warehouse
-    # (SparkSessionCatalog), no location_root needed.
-    +file_format: iceberg
+    # dbt-spark's Hudi support only exists under the `incremental`
+    # materialization, not plain `table` -- so `incremental` +
+    # `insert_overwrite_table` strategy is the Hudi equivalent of the old
+    # `table` + `file_format: iceberg` full-rebuild-every-run behavior. None
+    # of these models use is_incremental() filtering, so each `dbt run`
+    # still fully recomputes and overwrites the whole table, just via
+    # insert_overwrite instead of a plain CTAS.
+    +materialized: incremental
+    +incremental_strategy: insert_overwrite
+    +file_format: hudi
     dim:
       +schema: dim
 
@@ -54,6 +57,7 @@ models:
 seeds:
   my_project:
     +schema: staging
+    +file_format: hudi
     songs:
       +schema: staging
     state_codes:
