@@ -22,7 +22,7 @@ scrape_configs:
       - targets: ['spark-master:8080']
 
   # Targets each worker replica's container name directly -- 'spark-worker:8081'
-  # DNS round-robins to only one of the 3 replicas, so listing them individually
+  # DNS round-robins to only one of the 2 replicas, so listing them individually
   # is required to see all workers.
   - job_name: spark-worker
     metrics_path: /metrics/worker/prometheus
@@ -30,7 +30,6 @@ scrape_configs:
       - targets:
           - streaming-bigdata-viettel-demo-spark-worker-1:8081
           - streaming-bigdata-viettel-demo-spark-worker-2:8081
-          - streaming-bigdata-viettel-demo-spark-worker-3:8081
 
   - job_name: spark-streaming
     metrics_path: /metrics/prometheus

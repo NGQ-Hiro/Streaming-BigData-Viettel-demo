@@ -21,14 +21,14 @@ x-kafka-common: &kafka-common
 
 x-kafka-env: &kafka-env
   KAFKA_PROCESS_ROLES: 'broker,controller'
-  KAFKA_CONTROLLER_QUORUM_VOTERS: '1@broker-1:29093,2@broker-2:29093,3@broker-3:29093'
+  KAFKA_CONTROLLER_QUORUM_VOTERS: '1@broker-1:29093,2@broker-2:29093'
   KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
   KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
   KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
-  # 3 nodes → replication factor 3, min ISR 2 for the internal topics
-  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
-  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+  # 2 nodes → replication factor 2, min ISR 1 for the internal topics
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 2
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
   KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
   # Fixed cluster id so every node formats the same KRaft metadata log
   CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
@@ -76,19 +76,7 @@ services:
       KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9094'
       KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://broker-2:29092,PLAINTEXT_HOST://localhost:9094'
 
-  broker-3:
-    <<: *kafka-common
-    hostname: broker-3
-    container_name: broker-3
-    ports:
-      - "9095:9095"
-    environment:
-      <<: *kafka-env
-      KAFKA_NODE_ID: 3
-      KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9095'
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://broker-3:29092,PLAINTEXT_HOST://localhost:9095'
-
-  # Creates the event topics with 3 partitions (replication-factor 3) before any
+  # Creates the event topics with 3 partitions (replication-factor 2) before any
   # producer runs, so partitioning isn't left to broker auto-create defaults.
   # Runs to completion, then exits.
   kafka-init:
@@ -97,7 +85,6 @@ services:
     depends_on:
       - broker-1
       - broker-2
-      - broker-3
     restart: "no"
     entrypoint: ["/bin/bash", "-c"]
     command:
@@ -106,7 +93,7 @@ services:
         until /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker-1:29092 --list >/dev/null 2>&1; do sleep 3; done
         for t in listen_events page_view_events auth_events; do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker-1:29092 \
-            --create --if-not-exists --topic "$$t" --partitions 3 --replication-factor 3
+            --create --if-not-exists --topic "$$t" --partitions 3 --replication-factor 2
           # If the topic already existed with fewer partitions, grow it to 3.
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker-1:29092 \
             --alter --topic "$$t" --partitions 3 2>/dev/null || true
@@ -138,7 +125,7 @@ services:
           --nusers 1000000 \
           --growth-rate 10 \
           --userid 1 \
-          --kafkaBrokerList broker-1:29092,broker-2:29092,broker-3:29092
+          --kafkaBrokerList broker-1:29092,broker-2:29092
     networks:
       - my-network
 
@@ -164,14 +151,14 @@ services:
     depends_on:
       - spark-master
     deploy:
-      replicas: 3
+      replicas: 2
     environment:
       SPARK_WORKER_CORES: 2
       SPARK_WORKER_MEMORY: 2g
     # Range form so each replica gets its own host port (a fixed single
     # mapping would collide across replicas).
     ports:
-      - "8087-8089:8081"
+      - "8087-8088:8081"
 
   # Structured Streaming driver. Unlike the old one-shot flink-job-submitter,
   # spark-submit in client mode blocks for the life of the job (the container
@@ -191,7 +178,8 @@ services:
         condition: service_started
     restart: unless-stopped
     # cores.max=2 caps this job to half the cluster (2 workers x 2 cores = 4
-    # total) so the separate dbt-spark batch job isn't left waiting on slots.
+    # total) so spark-thrift isn't left waiting on slots. No headroom left
+    # for ad-hoc Spark SQL at this cluster size.
     command:
       - spark-submit
       - --master
@@ -203,8 +191,8 @@ services:
   # Long-running Spark Thrift Server: lets dbt (method: thrift) submit SQL
   # onto the real spark-master cluster instead of a local in-process
   # SparkSession, so it shares the same worker pool as spark-streaming.
-  # cores.max=2 leaves the 3rd worker's 2 cores as headroom (6 total,
-  # streaming takes 2, this takes 2).
+  # cores.max=2 uses the other half of the cluster (4 total, streaming
+  # takes 2, this takes 2) -- no headroom left for ad-hoc Spark SQL.
   spark-thrift:
     <<: *spark-common
     container_name: spark-thrift
@@ -300,13 +288,11 @@ services:
     command:
       - '--kafka.server=broker-1:29092'
       - '--kafka.server=broker-2:29092'
-      - '--kafka.server=broker-3:29092'
     ports:
       - "9308:9308"
     depends_on:
       - broker-1
       - broker-2
-      - broker-3
     networks:
       - my-network
 
