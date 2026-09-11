@@ -22,16 +22,25 @@ clean-targets:         # directories to be removed by `dbt clean`
   - "target"
   - "dbt_packages"
 
-# Creates the databases the models below live in (the streaming job owns
-# creating the bronze Hudi tables itself), then loads the songs seed
+# Creates the databases the models below live in, then registers the bronze
+# Hudi tables that spark-streaming writes. spark-streaming and spark-thrift
+# are separate Spark applications with separate, unshared catalogs (no Hive
+# metastore service configured) -- spark-streaming's own
+# `CREATE TABLE IF NOT EXISTS staging.<topic> USING hudi LOCATION ...` call
+# (stream_events.py) only registers each topic in ITS OWN session, so dbt/
+# Superset (talking to spark-thrift) can't see staging.auth_events etc.
+# without registering them here too. Same reasoning for the songs seed
 # (10k rows -- too many for a plain `dbt seed`, whose inline-VALUES compile
 # is near-quadratic in Catalyst; reading the CSV as a file source instead
-# stays fast at any row count). IF NOT EXISTS makes this a no-op after the
-# first run since songs.csv never changes.
+# stays fast at any row count). IF NOT EXISTS makes all of this a no-op after
+# the first run.
 on-run-start:
   - "CREATE DATABASE IF NOT EXISTS staging"
   - "CREATE DATABASE IF NOT EXISTS analytics"
   - "CREATE DATABASE IF NOT EXISTS dim"
+  - "CREATE TABLE IF NOT EXISTS staging.auth_events USING hudi LOCATION 's3a://lakehouse/staging/auth_events'"
+  - "CREATE TABLE IF NOT EXISTS staging.listen_events USING hudi LOCATION 's3a://lakehouse/staging/listen_events'"
+  - "CREATE TABLE IF NOT EXISTS staging.page_view_events USING hudi LOCATION 's3a://lakehouse/staging/page_view_events'"
   - "CREATE TEMPORARY VIEW songs_seed_raw USING csv OPTIONS (path 'file:///seeds/songs.csv', header 'true', inferSchema 'true')"
   - "CREATE TABLE IF NOT EXISTS staging.songs USING hudi TBLPROPERTIES (type = 'cow', primaryKey = 'song_id', preCombineField = 'song_id') LOCATION 's3a://lakehouse/staging/songs' AS SELECT * FROM songs_seed_raw"
 
@@ -55,8 +64,13 @@ models:
     +materialized: incremental
     +incremental_strategy: insert_overwrite
     +file_format: hudi
+    # Same missing-LOCATION issue as the seeds fix below: without this,
+    # Spark defaults to the local-disk warehouse dir and Hudi's metadata-table
+    # bootstrap throws FileNotFoundException listing a path that never existed.
+    +location_root: 's3a://lakehouse/analytics'
     dim:
       +schema: dim
+      +location_root: 's3a://lakehouse/dim'
 
 
 
