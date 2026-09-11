@@ -109,7 +109,7 @@ Grafana dashboards (`monitoring/grafana/dashboards/`) backed by Prometheus:
 Visualizations are built in Apache Superset (`superset/provision_dashboard.py` provisions them via the REST API), connected directly through the Spark Thrift Server to the `wide_streams` model. Layout below is the original dashboard design that the Superset provisioning script replicates.
 
 <p align="center">
-  <img src="image/dashboard.png" alt="Streamify Dashboard" width="700"/>
+  <img src="image/dashboard.png" alt="Streamify Dashboard" width="1400"/>
 </p>
 
 -----
