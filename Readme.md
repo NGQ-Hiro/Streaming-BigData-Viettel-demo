@@ -17,7 +17,7 @@ The Docker image is borrowed from [viirya's fork](https://github.com/viirya/even
 ## 📈 Project Architecture & Data Flow
 
 <p align="center">
-  <img src="image/overview.png" alt="Streamify Architecture Overview" width="700"/>
+  <img src="image/overview.png" alt="Streamify Architecture Overview" width="100%"/>
 </p>
 
 The project follows a modern lakehouse (ELT) architecture:
