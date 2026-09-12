@@ -108,4 +108,4 @@ The medallion architecture, shown in Figure~\ref{fig:medallion}, organizes a lak
     \item \textbf{Gold} tables hold data that has been modeled and aggregated into the shape consumers (BI tools, dashboards) actually query, typically built by a transformation layer reading from silver (or, when a project skips silver, directly from bronze).
 \end{itemize}
 
-This project uses only the bronze and gold layers: dbt reads directly from bronze and builds the gold star schema and wide table in one step (Section~\ref{sec:transformation-layer}), since the dataset is small and clean enough that a separate silver cleaning stage would add no value.
+This project uses all three layers: dbt reads bronze and builds the five dimension tables as silver, then reads bronze together with those silver dimensions to build the gold \texttt{fact\_streams} and \texttt{wide\_streams} tables (Section~\ref{sec:transformation-layer}).

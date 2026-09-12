@@ -8,6 +8,9 @@
 \setbeamercolor{title}{fg=BKTemplate,bg=}
 \setbeamertemplate{caption}[default]
 \setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{background canvas}{
+  \includegraphics[width=\paperwidth,height=\paperheight]{images/Background.pdf}
+}
 
 \setbeamertemplate{footline}{%
   \hfill%
@@ -29,41 +32,36 @@
 \usepackage{amsmath}
 \usepackage{tabularx}
 
-\graphicspath{{images/}{../image/}}
+\graphicspath{{images/}{../image/}{../report/images/}{../report/images/2/}{../report/images/4/}}
 
 \renewcommand{\footnotesize}{\tiny}
 
 %------------------------------------------------------------
-\title[Streaming Lakehouse Data Platform]
-{\vspace*{0.5cm}\\\textbf{VIETTEL DIGITAL TALENT 2026}\\\textbf{Streaming Lakehouse Data Platform}}
-
-\subtitle{Learning how a modern streaming platform works, end to end}
-
-\author[Ngo Quang Hieu]{
-  Mentor: Nguyen Minh Hieu \\
-  Student: Ngo Quang Hieu
+\title[Streaming Lakehouse Data Platform]{Streaming Lakehouse Data Platform}
+\subtitle{Course: Distributed Systems}
+\author[N.\,Q.\,Hieu, M.\,T.\,Hoang, L.\,V.\,M.\,Hieu]{
+  Supervisor: PhD. Nguyen Quang Hung \\[4pt]
+  Ngo Quang Hieu -- 2311015 \\
+  Mai Thanh Hoang -- 2311048 \\
+  Le Vu Minh Hieu -- 2310953
 }
-
-\institute[VDT 2026]{
-  Data Engineer Track \\
-  Viettel Digital Talent 2026
+\institute[HCMUT]{
+  Faculty of Computer Science and Engineering \\
+  Ho Chi Minh City University of Technology
 }
-
-\date[July 2026]{July 1$^{st}$, 2026}
+\date{Ho Chi Minh City, September 2026}
 %------------------------------------------------------------
 
 \begin{document}
 
 % ── Title ─────────────────────────────────────────────────────────────────────
+{
 \setbeamertemplate{background canvas}{
-  \includegraphics[width=\paperwidth,height=\paperheight]{images/FrontBackgroundvtt.png}
+  \includegraphics[width=\paperwidth,height=\paperheight]{images/FrontBackground.pdf}
 }
 \begin{frame}[plain]
 \titlepage
 \end{frame}
-
-\setbeamertemplate{background canvas}{
-  \includegraphics[width=\paperwidth,height=\paperheight]{images/Backgroundvtt.png}
 }
 
 \begin{frame}{Table of Contents}
@@ -79,51 +77,17 @@
   \column{0.5\textwidth}
   \textbf{Why a streaming lakehouse}
   \begin{itemize}\small
-    \item A music-streaming platform produces a continuous stream of small events, not daily batches
+    \item Eventsim emits a continuous stream of song-play, page-view, and login events onto 3 Kafka topics, not daily batches
     \item Batch ETL is always some interval behind reality -- fine for reports, too slow for "what is happening now"
-    \item Doing this reliably (not just fast) means solving ordering, fault tolerance, exactly-once delivery, and read/write contention
+    \item Doing this reliably (not just fast) means solving ordering, fault tolerance, exactly-once delivery, and read/write contention on a shared 4-core Spark cluster
   \end{itemize}
 
   \column{0.47\textwidth}
   \textbf{Goals}
   \begin{itemize}\small
-    \item Build a working, end-to-end streaming lakehouse pipeline and learn how a modern streaming platform works
-    \item Apply distributed-systems concepts from the course to a real system: partitioning, replication, exactly-once processing, lag monitoring
-    \item Make the whole system observable and reproducible -- single Docker Compose command
-  \end{itemize}
-\end{columns}
-\end{frame}
-
-%=============================================================================
-\section{Background \& Theory}
-%=============================================================================
-
-\begin{frame}{Core Concepts}
-\begin{columns}
-  \column{0.48\textwidth}
-  \textbf{Message queue (pub-sub)}
-  \begin{itemize}\small
-    \item Producers append to a durable, ordered log; consumers subscribe independently, at their own pace
-    \item Decouples producers from consumers in both time and number
-  \end{itemize}
-  \vspace{0.15cm}
-  \textbf{Batch vs.\ streaming engine}
-  \begin{itemize}\small
-    \item Batch: bounded input, runs once, stops
-    \item Streaming: unbounded input, engine never stops waiting for the next event (micro-batch or event-at-a-time)
-  \end{itemize}
-
-  \column{0.48\textwidth}
-  \textbf{Storage \& open table formats}
-  \begin{itemize}\small
-    \item Lakehouse = object storage (cheap, scalable) + an open table format on top for ACID upserts and time travel
-    \item COPY\_ON\_WRITE -- fast reads, expensive writes; MERGE\_ON\_READ -- cheap streaming appends, merged at read time
-  \end{itemize}
-  \vspace{0.15cm}
-  \textbf{Medallion layering}
-  \begin{itemize}\small
-    \item Bronze (raw) $\to$ silver (cleaned) $\to$ gold (modeled)
-    \item This project: bronze $\to$ gold directly -- dataset is small and clean enough to skip silver
+    \item Build the full Eventsim $\to$ Kafka $\to$ Spark Structured Streaming $\to$ Hudi $\to$ dbt $\to$ Superset pipeline, end to end
+    \item Apply distributed-systems concepts to a real system: 2-node Kafka replication, checkpointed exactly-once processing, consumer-lag monitoring
+    \item Make the whole system observable (Prometheus/Grafana) and reproducible -- single Docker Compose command
   \end{itemize}
 \end{columns}
 \end{frame}
@@ -133,14 +97,19 @@
 %=============================================================================
 
 \begin{frame}{The Problem Before Streaming Lakehouses}
-  \begin{itemize}\setlength\itemsep{5pt}
+  \begin{itemize}\setlength\itemsep{2pt}\small
     \item \textbf{Batch ETL latency} -- dashboards always reflect the last scheduled load, not the current state
     \item \textbf{Lambda-architecture complexity} -- a batch layer and a separate real-time speed layer duplicate the same logic in two codebases
     \item \textbf{No serving layer on the lake} -- plain object storage has no row-level update/delete or ACID transactions; the lake stayed a read-only dump
     \item \textbf{Storage and compute coupled} -- traditional warehouses force paying for both together, so teams kept two copies of the same data
   \end{itemize}
   \vspace{0.2cm}
-  \textbf{This project's concrete challenges:} keeping up with Eventsim's continuous arrival rate across 3 Kafka topics, exactly-once fault-tolerant processing on a 2-node cluster, and fitting everything inside a fixed, shared 4-core Spark budget.
+  \textbf{This project's concrete challenges:}
+  \begin{itemize}\small
+    \item \textbf{Streaming volume \& velocity} -- keeping up with Eventsim's continuous arrival rate across \texttt{listen\_events}, \texttt{page\_view\_events}, \texttt{auth\_events}
+    \item \textbf{Exactly-once, fault-tolerant processing} on a 2-node KRaft cluster (replication factor 2, 3 partitions/topic), no ZooKeeper
+    \item \textbf{Compute and partitioning} on a 4-core Spark Standalone cluster (1 master + 2 workers, 2 cores/2\,GB each), shared 2 cores each between the streaming job and the dbt Thrift Server
+  \end{itemize}
 \end{frame}
 
 %=============================================================================
@@ -149,68 +118,86 @@
 
 \begin{frame}{Streamify: End-to-End Architecture}
 \centering
-\includegraphics[width=0.82\textwidth]{app/overview.png}
+\includegraphics[width=1\textwidth]{overview.png}
 \end{frame}
 
-\begin{frame}{Ingestion Layer: Apache Kafka}
-\begin{columns}
-  \column{0.52\textwidth}
-  \includegraphics[width=\textwidth]{kafka/kafka_architecture.png}
-
-  \column{0.45\textwidth}
-  \begin{itemize}\small
-    \item 2-node KRaft cluster (\texttt{broker-1}, \texttt{broker-2}) -- no ZooKeeper, each node is broker \& controller
-    \item 3 topics (\texttt{listen\_events}, \texttt{page\_view\_events}, \texttt{auth\_events}), 3 partitions each, replication factor 2
-    \item Every partition has a leader on one broker and a follower on the other -- follower takes over if its broker fails
-  \end{itemize}
-\end{columns}
+\begin{frame}{Ingestion Layer: Message Queues \& Apache Kafka}
+\centering
+\includegraphics[width=0.5\textwidth]{message_queue.png}
+\vspace{0.2cm}
+\begin{itemize}\small
+  \item \textbf{Message queue (pub-sub)}: producers append to a durable, ordered log; consumers subscribe independently, at their own pace -- decoupled in both time and number
+  \item It play a role like a buffer between the producer and consumer, smoothing out bursts of traffic and allowing consumers to catch up
+  \item 2-node KRaft cluster (\texttt{broker-1}, \texttt{broker-2}) -- no ZooKeeper, each node is broker \& controller
+  \item 3 topics (\texttt{listen\_events}, \texttt{page\_view\_events}, \texttt{auth\_events}), 3 partitions each, replication factor 2 -- every partition has a leader on one broker and a follower on the other
+\end{itemize}
 \end{frame}
 
-\begin{frame}{Stream Processing: Spark Structured Streaming $\to$ Hudi Bronze}
+\begin{frame}{Streaming vs.\ Batch Processing}
 \begin{columns}
-  \column{0.55\textwidth}
-  \includegraphics[width=\textwidth]{engine/spark_micro_batch.png}
-  \par\vspace{2pt}{\tiny Driver polls Kafka, groups new records into a micro-batch, runs it as a Spark job}
-
-  \column{0.42\textwidth}
-  \begin{itemize}\small
-    \item Reads all 3 topics, fixes latin1-mojibake, derives time columns, appends to \texttt{staging.<topic>} (Hudi MERGE\_ON\_READ)
-    \item Checkpoint volume tracks Kafka offsets and query state -- resumes exactly where it left off on restart
-    \item Shares the 4-core Spark Standalone cluster with the dbt Thrift Server, 2 cores each
-  \end{itemize}
-\end{columns}
-\end{frame}
-
-\begin{frame}{Transformation \& Serving}
-\begin{columns}
-  \column{0.5\textwidth}
+  \column{0.48\textwidth}
   \centering
-  \includegraphics[width=\textwidth]{app/dbt_graph.png}
+  \includegraphics[width=\textwidth]{spark_batch_streaming_processing.png}
   \column{0.48\textwidth}
   \begin{itemize}\small
-    \item dbt builds a \textbf{star schema} (\texttt{fact\_streams} + 5 dims) and a denormalized \textbf{wide\_streams} table straight from bronze, via the Spark Thrift Server
-    \item Both materialized as COPY\_ON\_WRITE Hudi tables, rebuilt each run
-    \item \textbf{Superset} queries \texttt{wide\_streams} through the same Thrift Server -- one flat table, no dashboard-time joins
+    \item \textbf{Streaming processing} -- Spark Structured Streaming reads all Kafka topics continuously, parses and appends straight into storage as bronze (Hudi MERGE\_ON\_READ)
+    \item Checkpoint volume tracks Kafka offsets and query state -- resumes exactly where it left off on restart
+    \item \textbf{Batch processing} -- Spark also runs as the pipeline's transform layer: dbt reads bronze on a fixed trigger and builds the silver/gold models
   \end{itemize}
 \end{columns}
-\vspace{0.2cm}
+\end{frame}
+
+\begin{frame}{Storage Layer \& Open Table Formats}
 \centering
-\includegraphics[width=0.55\textwidth]{app/dashboard.png}
+\includegraphics[width=0.5\textwidth]{storage_open_table_format.png}
+\vspace{0.2cm}
+\begin{itemize}\small
+  \item \textbf{Distributed storage} (HDFS, S3, GCS, Azure) $\to$ \textbf{open file format} (Parquet, ORC) $\to$ \textbf{open table format} (Hudi, Delta Lake, Iceberg) on top, for ACID upserts and time travel
+  \item Plain files on distributed storage cannot do row-level update/delete or ACID transactions -- the open table format adds that, so the lake behaves like a table instead of an unmanaged pile of files
+  \item COPY\_ON\_WRITE -- fast reads, expensive writes; MERGE\_ON\_READ -- cheap streaming appends, merged at read time
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Transformation Layer: dbt}
+\centering
+\includegraphics[width=0.5\textwidth]{dbt_graph.png}
+\vspace{0.2cm}
+\begin{itemize}\small
+  \item \textbf{Silver} -- 5 dimension tables from bronze: \texttt{dim\_users}, \texttt{dim\_songs}, \texttt{dim\_artists}, \texttt{dim\_locations}, \texttt{dim\_datetime}
+  \item \textbf{Gold} -- \texttt{fact\_streams} (bronze + 5 dims, star schema) and \texttt{wide\_streams} (\texttt{fact\_streams} pre-joined with all 5 dims, so Superset needs no dashboard-time joins)
+  \item dbt is a SQL layer over the same Spark cluster: it generates Spark SQL and submits it via the Spark Thrift Server, materializing every model as COPY\_ON\_WRITE Hudi, rebuilt via full overwrite each run
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Serving: Apache Superset}
+\centering
+\includegraphics[width=0.8\textwidth]{dashboard.png}
+\vspace{0.2cm}
+\begin{itemize}\small
+  \item Superset queries \texttt{wide\_streams} through the Spark Thrift Server -- one flat table, no dashboard-time joins
+  \item \textbf{KPIs}: total streams, total users. \textbf{Breakdowns}: top songs \& artists (Chart Busters, Top Artists), gender distribution, user level by gender
+  \item \textbf{Time series}: user activity (stream count per hour). \textbf{Geo}: listen events per US state
+\end{itemize}
 \end{frame}
 
 \begin{frame}{Monitoring Layer}
+
 \begin{columns}
-  \column{0.48\textwidth}
-  \begin{itemize}\small
-    \item \textbf{kafka-exporter} -- per-partition consumer-group lag
-    \item \textbf{Spark's Prometheus endpoint} -- job/JVM metrics
-    \item \textbf{cAdvisor} -- per-container CPU/memory
-    \item Grafana renders lag and Spark job health so the system's health is visible, not just whether it is running
-  \end{itemize}
   \column{0.48\textwidth}
   \centering
   \includegraphics[width=\textwidth]{grafana_kafka.png}
+  \column{0.48\textwidth}
+  \centering
+  \includegraphics[width=\textwidth]{grafana_spark.png}
 \end{columns}
+
+\begin{itemize}\small
+  \item \textbf{Kafka metrics} (kafka-exporter) -- consumer-group lag per partition, messages in/out per second, under-replicated partitions
+  \item \textbf{Spark metrics} (Prometheus endpoint) -- streaming batch duration \& processing rate, executor CPU/memory, active jobs/stages
+  \item \textbf{Container metrics} (cAdvisor) -- per-container CPU and memory usage across the cluster
+  \item Grafana dashboards make these visible in real time -- e.g.\ rising consumer lag or batch duration flags the pipeline falling behind, not just whether it is running
+\end{itemize}
+
 \end{frame}
 
 %=============================================================================
@@ -236,28 +223,27 @@
 \textbf{Future Directions}
 \begin{itemize}\small
   \item Real or real-scale streaming dataset; autoscaled Kafka/Spark cluster
-  \item Alerting on consumer lag and job failures; a silver layer once bronze needs cleaning
+  \item Alerting on consumer lag and job failures
 \end{itemize}
 \end{frame}
 
 %=============================================================================
-\section{References}
+% \section{References}
 %=============================================================================
 
-\begin{frame}{References}
-  \begin{itemize}\small
-    \item Apache Kafka Documentation. \url{https://kafka.apache.org/documentation/}
-    \item Spark Structured Streaming Programming Guide. \url{https://spark.apache.org/docs/latest/structured-streaming-programming-guide.html}
-    \item Apache Hudi Documentation. \url{https://hudi.apache.org/docs/overview}
-    \item dbt Documentation (dbt-spark adapter). \url{https://docs.getdbt.com/docs/core/connect-data-platform/spark-setup}
-    \item Apache Superset Documentation. \url{https://superset.apache.org/docs/intro}
-    \item Eventsim (viirya's fork). \url{https://github.com/viirya/eventsim}
-    \item Million Song Dataset. \url{http://millionsongdataset.com}
-  \end{itemize}
-\end{frame}
+% \begin{frame}{References}
+%   \begin{itemize}\small
+%     \item Apache Kafka Documentation. \url{https://kafka.apache.org/documentation/}
+%     \item Spark Structured Streaming Programming Guide. \url{https://spark.apache.org/docs/latest/structured-streaming-programming-guide.html}
+%     \item Apache Hudi Documentation. \url{https://hudi.apache.org/docs/overview}
+%     \item dbt Documentation (dbt-spark adapter). \url{https://docs.getdbt.com/docs/core/connect-data-platform/spark-setup}
+%     \item Apache Superset Documentation. \url{https://superset.apache.org/docs/intro}
+%     \item Eventsim (viirya's fork). \url{https://github.com/viirya/eventsim}
+%     \item Million Song Dataset. \url{http://millionsongdataset.com}
+%   \end{itemize}
+% \end{frame}
 
 % ── The End ───────────────────────────────────────────────────────────────────
-\setbeamertemplate{footline}{}
 \begin{frame}
   \centering
   \vspace{1.2cm}
@@ -265,8 +251,8 @@
   \vspace{0.5cm}
   \textit{\Large{Thank you for your attention}}\\
   \vspace{0.5cm}
-  \textbf{Contact:}\\
-  Ngo Quang Hieu --- Viettel Digital Talent 2026
+  \textbf{Faculty of Computer Science and Engineering}\\
+  Ho Chi Minh City University of Technology
 \end{frame}
 
 \end{document}

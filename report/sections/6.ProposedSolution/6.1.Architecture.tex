@@ -7,7 +7,7 @@
     \label{fig:overview}
 \end{figure}
 
-Figure~\ref{fig:overview} shows the end-to-end architecture: Eventsim generates events into a Kafka~\cite{kafka} cluster, Spark Structured Streaming~\cite{spark-structured-streaming} consumes and lands them as Hudi~\cite{hudi} bronze tables, dbt transforms the bronze layer into a star schema and a wide table on the same Spark cluster, and Superset visualizes the result through the Spark Thrift Server, alongside a Prometheus/Grafana monitoring stack.
+Figure~\ref{fig:overview} shows the end-to-end architecture: Eventsim generates events into a Kafka~\cite{kafka} cluster, Spark Structured Streaming~\cite{spark-structured-streaming} consumes and lands them as Hudi~\cite{hudi} bronze tables, dbt transforms the bronze layer into silver dimension tables and gold fact/wide tables on the same Spark cluster, and Superset visualizes the result through the Spark Thrift Server, alongside a Prometheus/Grafana monitoring stack.
 
 \begin{table}[H]
     \centering
@@ -21,7 +21,7 @@ Figure~\ref{fig:overview} shows the end-to-end architecture: Eventsim generates 
         \hline
         Stream processing & Spark Structured Streaming 3.5.3 & Reads Kafka, decodes/enriches events, writes bronze tables to Hudi \\
         \hline
-        Table format / storage & Apache Hudi / Minio & MERGE\_ON\_READ bronze streaming tables, COPY\_ON\_WRITE gold/seed tables, on MinIO/S3 via the Hadoop S3A connector \\
+        Table format / storage & Apache Hudi / Minio & MERGE\_ON\_READ bronze streaming tables, COPY\_ON\_WRITE silver/gold/seed tables, on MinIO/S3 via the Hadoop S3A connector \\
         \hline
         Compute cluster & Spark Standalone (1 master, 2 workers) & Shared by the streaming job and dbt (via Thrift), 4 cores total \\
         \hline
@@ -42,9 +42,9 @@ The remainder of this chapter walks through the pipeline one layer at a time -- 
 
 \section{Storage Layer}
 
-Tables are Hudi-managed, backed by MinIO~\cite{minio}/S3 locally or real S3 in \texttt{aws} mode via the Hadoop S3A connector, with no rebuild needed to switch between the two -- only an environment variable (\texttt{LAKE\_ENV}). There is no separate catalog service: each table is self-describing at its storage path (a \texttt{.hoodie/} metadata directory) and is (re-)registered into Spark's catalog idempotently at job startup. Bronze tables use the MERGE\_ON\_READ table type, so fast streaming appends land as delta log files that are periodically compacted into columnar base files; gold and seed tables use COPY\_ON\_WRITE, rebuilt via full overwrite.
+Tables are Hudi-managed, backed by MinIO~\cite{minio}/S3 locally or real S3 in \texttt{aws} mode via the Hadoop S3A connector, with no rebuild needed to switch between the two -- only an environment variable (\texttt{LAKE\_ENV}). There is no separate catalog service: each table is self-describing at its storage path (a \texttt{.hoodie/} metadata directory) and is (re-)registered into Spark's catalog idempotently at job startup. Bronze tables use the MERGE\_ON\_READ table type, so fast streaming appends land as delta log files that are periodically compacted into columnar base files; silver, gold, and seed tables use COPY\_ON\_WRITE, rebuilt via full overwrite.
 
-\textbf{Why Hudi, and why MOR bronze / COW gold.} Hudi's self-describing \texttt{.hoodie/} metadata avoids the extra catalog or warehouse service that plain Parquet or Snowflake would require. Bronze uses MOR to keep frequent streaming appends cheap; gold uses COW because it is rebuilt once per run and then read repeatedly by Superset.
+\textbf{Why Hudi, and why MOR bronze / COW silver and gold.} Hudi's self-describing \texttt{.hoodie/} metadata avoids the extra catalog or warehouse service that plain Parquet or Snowflake would require. Bronze uses MOR to keep frequent streaming appends cheap; silver and gold use COW because each is rebuilt once per run and then read repeatedly -- by downstream dbt models or by Superset.
 
 \section{Ingestion Layer}
 
@@ -77,7 +77,7 @@ The Spark Standalone cluster shown in Figure~\ref{fig:spark-architecture} runs b
     \label{fig:spark-micro-batch}
 \end{figure}
 
-Two layers of work share this cluster. The \emph{streaming layer} is the long-running ingestion job: it consumes all three Kafka topics, fixes latin1-mojibake on text fields, derives time columns, and appends each micro-batch to bronze Hudi tables (\texttt{staging.<topic>}). The \emph{batch layer} is everything downstream of bronze -- dbt and Superset: dbt runs on the same Spark cluster as the streaming job, reading the bronze Hudi tables and writing the gold Hudi tables, and Superset connects to the Spark Thrift Server to query those gold tables for visualization.
+Two layers of work share this cluster. The \emph{streaming layer} is the long-running ingestion job: it consumes all three Kafka topics, fixes latin1-mojibake on text fields, derives time columns, and appends each micro-batch to bronze Hudi tables (\texttt{staging.<topic>}). The \emph{batch layer} is everything downstream of bronze -- dbt and Superset: dbt runs on the same Spark cluster as the streaming job, reading the bronze Hudi tables and writing the silver and gold Hudi tables, and Superset connects to the Spark Thrift Server to query the gold tables for visualization.
 
 Structured Streaming does not process events one at a time. Instead, as Figure~\ref{fig:spark-micro-batch} shows, the driver repeatedly polls the three Kafka topics for new offsets, groups the newly available records into a micro-batch, and schedules that micro-batch as a short-lived Spark job whose tasks run on the worker executors, in the same way a batch job would.
 
@@ -95,11 +95,12 @@ Structured Streaming resumes from a persisted checkpoint volume (\texttt{spark-c
     \label{fig:star-schema}
 \end{figure}
 
-The transformation layer turns each bronze Hudi table into an analytical data model, splitting it into a fact table and its dimension tables so downstream queries never touch bronze directly:
+The transformation layer turns each bronze Hudi table into an analytical data model over two further medallion layers, silver and gold (Section~\ref{sec:core-theory}), so downstream queries never touch bronze directly:
 
 \begin{itemize}
-    \item \textbf{Star schema.} One fact table, \texttt{fact\_streams}, joined to five dimension tables: \texttt{dim\_users}, \texttt{dim\_songs}, \texttt{dim\_artists}, \texttt{dim\_locations}, and \texttt{dim\_datetime}. This is the normalized, storage-efficient model (Section~\ref{sec:core-theory}).
-    \item \textbf{Wide table (\texttt{wide\_streams}).} A denormalized table built from the star schema by pre-joining \texttt{fact\_streams} with all five dimension tables, so that Superset can query a single flat table instead of performing joins at dashboard-query time.
+    \item \textbf{Silver -- dimension tables.} Five dimension tables built from bronze: \texttt{dim\_users}, \texttt{dim\_songs}, \texttt{dim\_artists}, \texttt{dim\_locations}, and \texttt{dim\_datetime}. Each cleans and conforms one entity out of the raw bronze events, independent of any one fact table.
+    \item \textbf{Gold -- star schema.} The fact table \texttt{fact\_streams}, built from bronze joined against the five silver dimensions. This is the normalized, storage-efficient model (Section~\ref{sec:core-theory}).
+    \item \textbf{Gold -- wide table (\texttt{wide\_streams}).} A denormalized table built by pre-joining \texttt{fact\_streams} with all five silver dimension tables, so that Superset can query a single flat table instead of performing joins at dashboard-query time.
 \end{itemize}
 
 \begin{figure}[H]
@@ -109,7 +110,7 @@ The transformation layer turns each bronze Hudi table into an analytical data mo
     \label{fig:dbt-graph}
 \end{figure}
 
-Rather than hand-writing this as Spark job code, dbt~\cite{dbt} acts as a SQL abstraction layer above the same Spark cluster: it generates the underlying Spark SQL and submits it through the Spark Thrift Server (\texttt{method: thrift}), materializing both model layers as COPY\_ON\_WRITE Hudi tables rebuilt via full overwrite each run. dbt builds a DAG of models -- declared in \texttt{dbt\_project.yml}, with each model a SQL query under \texttt{models/} -- where every model transforms one or more upstream models into a new table. Figure~\ref{fig:dbt-graph} shows the resulting DAG, with bronze sources at the bottom, the star schema in the middle, and \texttt{wide\_streams} at the top.
+Rather than hand-writing this as Spark job code, dbt~\cite{dbt} acts as a SQL abstraction layer above the same Spark cluster: it generates the underlying Spark SQL and submits it through the Spark Thrift Server (\texttt{method: thrift}), materializing every silver and gold model as a COPY\_ON\_WRITE Hudi table rebuilt via full overwrite each run. dbt builds a DAG of models -- declared in \texttt{dbt\_project.yml}, with each model a SQL query under \texttt{models/} -- where every model transforms one or more upstream models into a new table. Figure~\ref{fig:dbt-graph} shows the resulting DAG, with bronze sources at the bottom, the silver dimension tables next, the gold \texttt{fact\_streams} after that, and \texttt{wide\_streams} at the top.
 
 \textbf{Why dbt, and why both a star schema and a wide table.} dbt was chosen over a layer of hand-written Spark SQL scripts because it declares model dependencies explicitly (via \texttt{ref()}/\texttt{source()}), runs a built-in test framework against every model (uniqueness, not-null, referential integrity), generates documentation from the same source files, and is friendlier to iterate on during development -- properties that matter given the five-dimension join the fact table depends on. Modelling both a star schema and a separate wide table, rather than either alone, keeps normalization and storage efficiency in the star schema while keeping BI query simplicity in \texttt{wide\_streams}, instead of trading one off against the other.
 
