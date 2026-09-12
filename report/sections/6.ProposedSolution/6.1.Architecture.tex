@@ -7,11 +7,11 @@
     \label{fig:overview}
 \end{figure}
 
-Figure~\ref{fig:overview} shows the end-to-end architecture: Eventsim generates events into a Kafka cluster, Spark Structured Streaming consumes and lands them as Hudi bronze tables, dbt transforms the bronze layer into a star schema and a wide table on the same Spark cluster, and Superset visualizes the result through the Spark Thrift Server, alongside a Prometheus/Grafana monitoring stack.
+Figure~\ref{fig:overview} shows the end-to-end architecture: Eventsim generates events into a Kafka~\cite{kafka} cluster, Spark Structured Streaming~\cite{spark-structured-streaming} consumes and lands them as Hudi~\cite{hudi} bronze tables, dbt transforms the bronze layer into a star schema and a wide table on the same Spark cluster, and Superset visualizes the result through the Spark Thrift Server, alongside a Prometheus/Grafana monitoring stack.
 
 \begin{table}[H]
     \centering
-    \begin{tabulary}{\textwidth}{|l|l|L|}
+    \begin{tabulary}{\textwidth}{|p{3.5cm}|p{4cm}|L|}
         \hline
         \textbf{Layer} & \textbf{Tool} & \textbf{Role} \\
         \hline
@@ -21,7 +21,7 @@ Figure~\ref{fig:overview} shows the end-to-end architecture: Eventsim generates 
         \hline
         Stream processing & Spark Structured Streaming 3.5.3 & Reads Kafka, decodes/enriches events, writes bronze tables to Hudi \\
         \hline
-        Table format / storage & Apache Hudi & MERGE\_ON\_READ bronze streaming tables, COPY\_ON\_WRITE gold/seed tables, on MinIO/S3 via the Hadoop S3A connector \\
+        Table format / storage & Apache Hudi / Minio & MERGE\_ON\_READ bronze streaming tables, COPY\_ON\_WRITE gold/seed tables, on MinIO/S3 via the Hadoop S3A connector \\
         \hline
         Compute cluster & Spark Standalone (1 master, 2 workers) & Shared by the streaming job and dbt (via Thrift), 4 cores total \\
         \hline
@@ -29,7 +29,7 @@ Figure~\ref{fig:overview} shows the end-to-end architecture: Eventsim generates 
         \hline
         Visualization & Apache Superset & Dashboards connected to the Spark Thrift Server \\
         \hline
-        Monitoring & Prometheus, Grafana, cAdvisor & Kafka consumer-group lag, Spark JVM/streaming metrics, per-container CPU/memory \\
+        Monitoring & Prometheus, Grafana & Kafka consumer-group lag, Spark JVM/streaming metrics, per-container CPU/memory \\
         \hline
         Containerization & Docker Compose & Single-command reproducible deployment \\
         \hline
@@ -82,7 +82,7 @@ Structured Streaming resumes from a persisted checkpoint volume (\texttt{spark-c
 
 \section{Storage Layer}
 
-Tables are Hudi-managed, backed by MinIO/S3 locally or real S3 in \texttt{aws} mode via the Hadoop S3A connector, with no rebuild needed to switch between the two -- only an environment variable (\texttt{LAKE\_ENV}). There is no separate catalog service: each table is self-describing at its storage path (a \texttt{.hoodie/} metadata directory) and is (re-)registered into Spark's catalog idempotently at job startup. Bronze tables use the MERGE\_ON\_READ table type, so fast streaming appends land as delta log files that are periodically compacted into columnar base files; gold and seed tables use COPY\_ON\_WRITE, rebuilt via full overwrite.
+Tables are Hudi-managed, backed by MinIO~\cite{minio}/S3 locally or real S3 in \texttt{aws} mode via the Hadoop S3A connector, with no rebuild needed to switch between the two -- only an environment variable (\texttt{LAKE\_ENV}). There is no separate catalog service: each table is self-describing at its storage path (a \texttt{.hoodie/} metadata directory) and is (re-)registered into Spark's catalog idempotently at job startup. Bronze tables use the MERGE\_ON\_READ table type, so fast streaming appends land as delta log files that are periodically compacted into columnar base files; gold and seed tables use COPY\_ON\_WRITE, rebuilt via full overwrite.
 
 \textbf{Why Hudi, and why MOR bronze / COW gold.} Hudi's self-describing \texttt{.hoodie/} metadata avoids the extra catalog or warehouse service that plain Parquet or Snowflake would require. Bronze uses MOR to keep frequent streaming appends cheap; gold uses COW because it is rebuilt once per run and then read repeatedly by Superset.
 
