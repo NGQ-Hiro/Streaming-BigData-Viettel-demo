@@ -1,0 +1,31 @@
+\section{Core Theory and Concepts}
+\label{sec:core-theory}
+
+This section summarizes the underlying concepts of the technologies used to build the pipeline in Chapter~\ref{ch:proposed-solution}.
+
+\subsection{Event Streaming and Publish-Subscribe Messaging}
+
+Event streaming treats data as an unbounded sequence of immutable events (e.g. ``user played a song'') rather than as static rows in a table. Producers append events to a log; one or more consumers read that log independently and at their own pace. Apache Kafka~\cite{kafka} implements this as a publish-subscribe (pub-sub) system: producers publish events to named \emph{topics}, and consumers subscribe to the topics they need, decoupling producers from consumers in time and in number.
+
+\subsubsection{Partitioning and Replication}
+
+A Kafka topic is split into \emph{partitions}, each an ordered, append-only log. Partitioning is Kafka's unit of parallelism: different partitions of the same topic can be produced to and consumed from concurrently, and ordering is only guaranteed within a single partition. Each partition can additionally be \emph{replicated} across multiple brokers (replication factor); one replica is the leader that serves reads and writes, and the others are followers that copy the leader's log. If a broker holding the leader replica fails, a follower on a surviving broker can take over, so the topic keeps serving as long as at least one replica of each partition survives.
+
+\subsection{Spark Structured Streaming and Micro-batching}
+
+Apache Spark Structured Streaming~\cite{spark-structured-streaming} runs a streaming query as a series of small, discrete batch jobs (\emph{micro-batches}) on Spark's existing batch execution engine, rather than processing each event individually. On a fixed trigger interval, the engine reads whatever new data has arrived since the last batch (tracked via checkpointed offsets), applies the same DataFrame/SQL transformations used for batch queries, and writes the result. This design reuses Spark's mature batch engine (query planning, fault tolerance, exactly-once output via checkpointing) at the cost of end-to-end latency being bounded by the micro-batch interval rather than being event-at-a-time.
+
+\subsection{Table Formats: Apache Hudi (MERGE\_ON\_READ vs. COPY\_ON\_WRITE)}
+
+Apache Hudi~\cite{hudi} is a transactional table format for data lakes: it adds row-level insert/update/delete semantics, ACID commits, and time-travel to plain files on object storage (S3, MinIO, HDFS, ...). Hudi supports two table types that trade off write cost against read cost:
+
+\begin{itemize}
+    \item \textbf{COPY\_ON\_WRITE (COW).} Every write rewrites the affected data files as new versioned Parquet files. Reads are fast (plain Parquet, no merge step), but writes are more expensive because entire files are rewritten on update.
+    \item \textbf{MERGE\_ON\_READ (MOR).} Writes are appended to a compact row-based delta log next to the existing base Parquet files; the two are merged only at read time (or during a background compaction job). Writes are cheap and low-latency, at the cost of extra work on read (or a periodic compaction step) to materialize the merged view.
+\end{itemize}
+
+MOR suits high-frequency streaming appends, where write latency matters most; COW suits tables that are rebuilt in full on a schedule and then read many times, where read performance matters most.
+
+\subsection{Star-Schema Dimensional Modeling}
+
+Dimensional modeling organizes an analytical warehouse around a central \emph{fact table} of measurable events (here, one row per stream/play event) surrounded by \emph{dimension tables} of descriptive attributes (who, what, where, when) that the fact table references by key. This ``star'' shape -- one fact table joined to several dimension tables -- normalizes descriptive attributes into reusable dimensions while keeping the fact table narrow, and is the standard layout for BI and reporting workloads because it keeps common queries (aggregate the fact table, filter/group by a dimension) to a small, predictable number of joins.

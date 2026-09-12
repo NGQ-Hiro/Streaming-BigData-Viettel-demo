@@ -1,0 +1,19 @@
+\section{Dataset}
+
+The pipeline is driven by \href{https://github.com/Interana/eventsim}{Eventsim}, a synthetic event generator that simulates page-request and listening activity on a fake music-streaming website (the Docker image used is \href{https://github.com/viirya/eventsim}{viirya's fork} of the original, unmaintained project). Eventsim draws its song catalog from the \href{http://millionsongdataset.com}{Million Song Dataset}; this project uses the official \href{http://millionsongdataset.com/pages/getting-dataset/\#subset}{10,000-song subset}. The generated events (\texttt{listen\_events}, \texttt{page\_view\_events}, \texttt{auth\_events}) look like real user-activity logs but are entirely synthetic, which makes them safe to publish and reproduce without any user-privacy concern.
+
+\section{Technical Challenges}
+
+Building a streaming lakehouse pipeline on top of this dataset raised the following challenges.
+
+\subsection{Streaming Volume and Velocity}
+
+Eventsim continuously emits events across three topics, so the pipeline must ingest, decode, and land data in the lakehouse without falling behind the producer. This requires a message queue that can buffer and parallelize consumption (Kafka, partitioned per topic) and a streaming engine that can keep its micro-batch processing time below the arrival rate.
+
+\subsection{Exactly-once, Fault-tolerant Processing on a 2-node Kafka Cluster}
+
+Kafka runs as a 2-node KRaft cluster (no ZooKeeper), with each topic replicated across both brokers (replication factor 2, 3 partitions per topic). With only two brokers, the cluster must keep serving every partition if either single broker is restarted or fails, while Spark Structured Streaming must resume exactly where it left off after any restart. This project relies on Structured Streaming's checkpointed offsets (persisted to a durable checkpoint volume) as the source of truth for resuming the stream, and on Kafka's per-partition replication across the two brokers for broker-level fault tolerance.
+
+\subsection{Computing and Partitioning on a Small, Shared Spark Cluster}
+
+The Spark Standalone cluster totals only 4 cores across one master and two workers (2 cores / 2 GB each), and those 4 cores are shared between two long-running applications: the Spark Structured Streaming ingestion job (capped at 2 cores) and the Spark Thrift Server that dbt submits its SQL transformations through (also capped at 2 cores). This leaves no spare capacity for ad-hoc Spark SQL at this cluster size, and means both the streaming job's micro-batch partitioning and dbt's batch transformation jobs must fit within their fixed 2-core budget rather than being able to scale out elastically.

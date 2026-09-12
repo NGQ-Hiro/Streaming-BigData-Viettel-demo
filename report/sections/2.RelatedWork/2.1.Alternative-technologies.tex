@@ -1,0 +1,24 @@
+\section{Alternative Technologies}
+
+Several alternative technologies were considered for each stage of the pipeline before settling on the stack described in Chapter~\ref{ch:proposed-solution}.
+
+\subsection{Stream Processing: Apache Flink vs. Apache Spark Structured Streaming}
+
+Apache Flink~\cite{flink} is a distributed stream-processing engine built around native, event-at-a-time streaming with low end-to-end latency. An earlier version of this project used a Flink SQL job for the Kafka-to-lakehouse ingestion path. Apache Spark Structured Streaming~\cite{spark-structured-streaming}, in contrast, models streaming as a sequence of small batch jobs (micro-batching) on top of the same engine used for batch and SQL workloads.
+
+The project replaced the Flink job with a Spark Structured Streaming job (Section~\ref{sec:core-theory}) for two practical reasons:
+
+\begin{itemize}
+    \item \textbf{Unified engine.} dbt already needed a Spark cluster (via the Spark Thrift Server) for the batch transformation layer. Running the streaming ingestion job on the same Spark Standalone cluster avoids operating two separate distributed engines (Flink and Spark) on a cluster with only 4 cores in total.
+    \item \textbf{Native Hudi integration.} Apache Hudi ships first-class Spark data source support, which simplifies writing MERGE\_ON\_READ bronze tables directly from the streaming job.
+\end{itemize}
+
+The trade-off is latency: Flink's native streaming model can achieve lower per-event latency than Spark's micro-batch model. For this project's throughput and cluster size, the micro-batch trade-off was considered acceptable.
+
+\subsection{Storage \& Warehousing: Data Lakehouse (Hudi) vs. Cloud Data Warehouse (Snowflake)}
+
+Cloud data warehouses such as Snowflake~\cite{snowflake} offer a fully managed SQL warehouse with separate storage and compute, but couple the project to a proprietary, hosted platform and its billing model. This project instead adopted the lakehouse pattern: raw and modelled data are stored as Apache Hudi tables on object storage (MinIO locally, Amazon S3 in \texttt{aws} mode), and Spark/dbt query that storage directly. This keeps the storage layer open-format and self-describing (each Hudi table carries its own \texttt{.hoodie/} metadata directory, so no separate catalog service is required) and keeps the whole stack deployable with Docker Compose on a single machine or a small cluster, which suited the project's development and demonstration constraints better than a managed cloud warehouse.
+
+\subsection{Processing Paradigm: Streaming vs. Plain Batch ETL}
+
+A simpler alternative would have been a plain batch ETL job: periodically read newly arrived Eventsim output files and load them into the warehouse. This project instead used an always-on streaming pipeline (Kafka plus Spark Structured Streaming) so that events are captured and land in the bronze layer continuously, closer to real time, and so that the project could demonstrate streaming-specific concerns -- partitioning, replication, checkpointed exactly-once processing, and consumer lag monitoring -- that a batch-only design would not exercise.

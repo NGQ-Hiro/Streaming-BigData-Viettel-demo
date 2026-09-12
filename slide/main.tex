@@ -29,7 +29,7 @@
 \usepackage{amsmath}
 \usepackage{tabularx}
 
-\graphicspath{{images/}}
+\graphicspath{{images/}{../image/}}
 
 \renewcommand{\footnotesize}{\tiny}
 
@@ -37,7 +37,7 @@
 \title[Streaming Processing in BigData Platform]
 {\vspace*{0.5cm}\\\textbf{VIETTEL DIGITAL TALENT 2026}\\\textbf{Streaming Processing in BigData Platform}}
 
-\subtitle{Real-time data pipelines with Apache Kafka \& Apache Flink}
+\subtitle{Real-time data pipelines with Apache Kafka \& Apache Spark Structured Streaming}
 
 \author[Ngo Quang Hieu]{
   Mentor: Nguyen Minh Hieu \\
@@ -112,14 +112,76 @@
   \textbf{Objectives}
   \begin{enumerate}\setlength\itemsep{6pt}
     \item Overview \textbf{Apache Kafka} as a distributed message queue
-    \item Overview \textbf{Apache Flink} as a real-time stream processing engine
-    \item Build an end-to-end \textbf{ELT streaming pipeline} — from event simulation to BI dashboard
+    \item Overview \textbf{Apache Spark Structured Streaming} as a real-time stream processing engine
+    \item Build an end-to-end \textbf{ELT streaming pipeline} — from event simulation, through a \textbf{Hudi lakehouse}, to a \textbf{Superset} BI dashboard
     \item Demonstrate \textbf{observability} with Prometheus \& Grafana monitoring
   \end{enumerate}
 \end{frame}
 
 %=============================================================================
-\section{Project Architecture}
+\section{Background \& Design Choices}
+%=============================================================================
+
+\begin{frame}{Core Concepts}
+\begin{columns}
+  \column{0.48\textwidth}
+  \textbf{Kafka: Publish/Subscribe}
+  \begin{itemize}\small
+    \item Producers write to \textbf{topics}; consumers subscribe independently
+    \item Durable, replicated, append-only log — replay any offset
+  \end{itemize}
+  \vspace{0.2cm}
+  \textbf{Structured Streaming: Micro-Batch}
+  \begin{itemize}\small
+    \item Treats a stream as an unbounded, incrementally-processed table
+    \item Each trigger reads a bounded slice of new Kafka records and runs a Spark batch job over it
+  \end{itemize}
+
+  \column{0.48\textwidth}
+  \textbf{Hudi: COW vs.\ MOR}
+  \begin{itemize}\small
+    \item \textbf{Copy-on-Write (COW)} — rewrites base files on every write; fast reads, simple
+    \item \textbf{Merge-on-Read (MOR)} — appends to delta log files, compacted later; fast writes for high-frequency streaming appends
+  \end{itemize}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Why Spark + Hudi + Superset?}
+  \begin{itemize}\setlength\itemsep{6pt}
+    \item \textbf{Spark Structured Streaming vs.\ Flink} — one engine (Spark) covers both the streaming ingest job and the batch SQL that dbt submits, so the same 4-core cluster serves both without running two separate engines
+    \item \textbf{Hudi vs.\ Snowflake} — an open table format on commodity object storage (MinIO/S3A); no managed warehouse subscription, and MOR bronze tables absorb frequent small streaming writes cheaply
+    \item \textbf{Superset vs.\ Power BI} — open-source, connects directly to the same Spark Thrift Server the pipeline already runs, no extra licensing or export step
+  \end{itemize}
+\end{frame}
+
+%=============================================================================
+\section{Problem \& Challenges}
+%=============================================================================
+
+\begin{frame}{Dataset}
+  \textbf{Eventsim}
+  \begin{itemize}\small
+    \item Simulates page requests for a fake music-streaming website — synthetic but realistic user behaviour
+    \item Generates three event streams: \texttt{listen\_events}, \texttt{page\_view\_events}, \texttt{auth\_events}
+  \end{itemize}
+  \vspace{0.2cm}
+  \textbf{Million Song Dataset (subset)}
+  \begin{itemize}\small
+    \item Eventsim draws song/artist metadata from a \textbf{10,000-song subset} of the Million Song Dataset
+    \item Gives listen events realistic song, artist, and duration attributes
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Technical Challenges}
+  \begin{itemize}\setlength\itemsep{6pt}
+    \item \textbf{Continuous streaming volume} — events must be ingested, decoded, and enriched (mojibake fixes, derived time columns) without falling behind Kafka
+    \item \textbf{Small, shared compute} — the whole Spark Standalone cluster is \textbf{1 master + 2 workers, 4 cores total}, split between the streaming job and the dbt Thrift Server, with no headroom for ad-hoc SQL
+    \item \textbf{Partitioning \& parallelism} — Kafka topics have only 3 partitions each; partition count, replication factor, and Spark's capped cores all bound end-to-end throughput
+  \end{itemize}
+\end{frame}
+
+%=============================================================================
+\section{Proposed Solution}
 %=============================================================================
 
 \begin{frame}{Streamify: End-to-End Architecture}
@@ -133,10 +195,10 @@
   \begin{tikzpicture}[node distance=0.45cm, every node/.style={font=\small}]
     \node[draw, fill=BKTemplate!15, rounded corners, minimum width=4.0cm, align=center] (ev) {\textbf{Eventsim} — event simulation};
     \node[draw, fill=BKTemplate!25, rounded corners, minimum width=4.0cm, align=center, below=of ev] (kf) {\textbf{Apache Kafka} — message queue};
-    \node[draw, fill=BKTemplate!35, rounded corners, minimum width=4.0cm, align=center, below=of kf] (fl) {\textbf{Apache Flink} — stream processing};
-    \node[draw, fill=BKTemplate!45, rounded corners, minimum width=4.0cm, align=center, below=of fl] (sf) {\textbf{Snowflake} — data warehouse};
-    \node[draw, fill=BKTemplate!55, rounded corners, minimum width=4.0cm, align=center, below=of sf] (dbt) {\textbf{dbt} — transformation};
-    \node[draw, fill=BKTemplate!65, rounded corners, minimum width=4.0cm, align=center, below=of dbt] (bi) {\textbf{Power BI} — dashboard};
+    \node[draw, fill=BKTemplate!35, rounded corners, minimum width=4.0cm, align=center, below=of kf] (fl) {\textbf{Spark Structured Streaming} — processing};
+    \node[draw, fill=BKTemplate!45, rounded corners, minimum width=4.0cm, align=center, below=of fl] (sf) {\textbf{Apache Hudi} — lakehouse storage};
+    \node[draw, fill=BKTemplate!55, rounded corners, minimum width=4.0cm, align=center, below=of sf] (dbt) {\textbf{dbt} — transformation (via Thrift)};
+    \node[draw, fill=BKTemplate!65, rounded corners, minimum width=4.0cm, align=center, below=of dbt] (bi) {\textbf{Apache Superset} — dashboard};
     \draw[-{Stealth}] (ev) -- (kf);
     \draw[-{Stealth}] (kf) -- (fl);
     \draw[-{Stealth}] (fl) -- (sf);
@@ -156,9 +218,18 @@
   \begin{itemize}\small
     \item Fully containerised with \textbf{Docker Compose}
     \item Single command: \texttt{docker compose up}
-    \item Flink job auto-submitted on startup
+    \item Spark Standalone: \textbf{1 master + 2 workers} (2 cores / 2 GB each), shared by the streaming job and the dbt Thrift Server
   \end{itemize}
 \end{columns}
+\end{frame}
+
+\begin{frame}{Workflow}
+  \begin{enumerate}\setlength\itemsep{5pt}
+    \item \textbf{Kafka} — Eventsim publishes to \texttt{listen\_events}, \texttt{page\_view\_events}, \texttt{auth\_events}
+    \item \textbf{Spark Structured Streaming} — reads all three topics, fixes latin1-mojibake, derives time columns, appends each micro-batch to \textbf{bronze} Hudi tables (\texttt{staging.<topic>}, MERGE\_ON\_READ)
+    \item \textbf{dbt (dbt-spark, Thrift)} — builds the star schema (\texttt{fact\_streams} + 5 dims) and the \texttt{wide\_streams} table on top of bronze, materialized as COPY\_ON\_WRITE Hudi tables
+    \item \textbf{Superset} — dashboards query \texttt{wide\_streams} through the same Spark Thrift Server
+  \end{enumerate}
 \end{frame}
 
 %=============================================================================
@@ -209,157 +280,165 @@
 \begin{frame}{Kafka Setup in Streamify}
 \begin{columns}
   \column{0.48\textwidth}
-  \textbf{3-Node KRaft Cluster}
+  \textbf{2-Node KRaft Cluster}
   \begin{itemize}\small
     \item Runs on \textbf{apache/kafka:4.3.0} — no Zookeeper
-    \item Each node is both broker \& controller
-    \item \textbf{Replication factor 3}, min ISR 2 — no data loss if one broker restarts
+    \item Each node (\texttt{broker-1}, \texttt{broker-2}) is both broker \& controller
+    \item \textbf{Replication factor 2} — every partition has a replica on both brokers, no data loss if one broker restarts
   \end{itemize}
   \vspace{0.3cm}
   \textbf{Topic Configuration}
   \begin{itemize}\small
     \item 3 topics: \texttt{listen\_events}, \texttt{page\_view\_events}, \texttt{auth\_events}
-    \item \textbf{3 partitions} per topic — enables parallel consumption by Flink
+    \item \textbf{3 partitions} per topic — enables parallel consumption by Spark Structured Streaming
     \item Topics pre-created by \texttt{kafka-init} before producers start
   \end{itemize}
 
   \column{0.48\textwidth}
-  \begin{tikzpicture}[node distance=0.45cm and 0.3cm, every node/.style={font=\tiny}]
+  \begin{tikzpicture}[node distance=0.45cm and 0.5cm, every node/.style={font=\tiny}]
     % Producer
     \node[draw, fill=BKTemplate!20, rounded corners, minimum width=4.0cm, align=center, font=\small] (ev) {Eventsim (producer)};
 
-    % Brokers — each holds one partition leader
-    \node[draw, fill=BKTemplate!15, rounded corners, minimum width=1.15cm, minimum height=1.0cm, align=center,
-      below left=0.6cm and 0.85cm of ev] (b1) {broker-1\\[2pt]\textbf{P0} leader\\P1 replica\\P2 replica};
-    \node[draw, fill=BKTemplate!15, rounded corners, minimum width=1.15cm, minimum height=1.0cm, align=center,
-      below=0.6cm of ev] (b2) {broker-2\\[2pt]P0 replica\\\textbf{P1} leader\\P2 replica};
-    \node[draw, fill=BKTemplate!15, rounded corners, minimum width=1.15cm, minimum height=1.0cm, align=center,
-      below right=0.6cm and 0.85cm of ev] (b3) {broker-3\\[2pt]P0 replica\\P1 replica\\\textbf{P2} leader};
+    % Brokers — RF2 across 2 nodes
+    \node[draw, fill=BKTemplate!15, rounded corners, minimum width=1.6cm, minimum height=1.0cm, align=center,
+      below left=0.6cm and 0.9cm of ev] (b1) {broker-1\\[2pt]\textbf{P0} leader\\\textbf{P2} leader\\P1 replica};
+    \node[draw, fill=BKTemplate!15, rounded corners, minimum width=1.6cm, minimum height=1.0cm, align=center,
+      below right=0.6cm and 0.9cm of ev] (b2) {broker-2\\[2pt]\textbf{P1} leader\\P0 replica\\P2 replica};
 
-    % Flink consumers
-    \node[draw, fill=BKTemplate!15, rounded corners, minimum width=1.15cm, align=center,
-      below=0.5cm of b1] (tm1) {TM-1\\reads P0};
-    \node[draw, fill=BKTemplate!15, rounded corners, minimum width=1.15cm, align=center,
-      below=0.5cm of b2] (tm2) {TM-2\\reads P1};
-    \node[draw, fill=BKTemplate!15, rounded corners, minimum width=1.15cm, align=center,
-      below=0.5cm of b3] (tm3) {TM-3\\reads P2};
+    % Spark Structured Streaming reader
+    \node[draw, fill=BKTemplate!15, rounded corners, minimum width=4.2cm, align=center,
+      below=0.6cm of ev] (sp) {Spark Structured Streaming\\reads P0, P1, P2 in one query};
 
     % Arrows: producer → each broker (writes to all for replication)
     \draw[-{Stealth}] (ev) -- (b1);
     \draw[-{Stealth}] (ev) -- (b2);
-    \draw[-{Stealth}] (ev) -- (b3);
 
-    % Arrows: each TM reads from its partition leader
-    \draw[-{Stealth}] (b1) -- (tm1);
-    \draw[-{Stealth}] (b2) -- (tm2);
-    \draw[-{Stealth}] (b3) -- (tm3);
+    % Arrows: each broker → Spark reader
+    \draw[-{Stealth}] (b1) -- (sp);
+    \draw[-{Stealth}] (b2) -- (sp);
   \end{tikzpicture}
 \end{columns}
 \end{frame}
 
 %=============================================================================
-\section{Stream Processing: Apache Flink}
+\section{Stream Processing: Spark Structured Streaming \& Hudi}
 %=============================================================================
 
-\begin{frame}{Apache Flink: True Event Streaming}
+\begin{frame}{Spark Structured Streaming: Micro-Batch Model}
 \begin{columns}
   \column{0.55\textwidth}
-  \includegraphics[width=\textwidth]{engine/flink_dataflow_unbounded_stream.png}
-  \par\vspace{1pt}{\tiny True streaming: records flow through operator DAG one-by-one}
+  \includegraphics[width=\textwidth]{engine/spark_micro_batch.png}
+  \par\vspace{1pt}{\tiny Each trigger processes a bounded batch of new Kafka records as a Spark job}
   \vspace{0.15cm}
 
-  \includegraphics[width=\textwidth]{engine/flink_checkpoint.png}
-  \par\vspace{1pt}{\tiny Chandy-Lamport barriers: async snapshots without pausing processing}
+  \includegraphics[width=\textwidth]{engine/spark_architecture.png}
 
   \column{0.42\textwidth}
   \textbf{Dataflow Model}
   \begin{itemize}\small
-    \item \textbf{Record-at-a-time} — no batching delay
-    \item Operators form a DAG; data flows continuously
-    \item \textbf{Event time + watermarks} — correct out-of-order handling
+    \item \textbf{Micro-batch} — the stream is an unbounded table, incrementally queried on a trigger interval
+    \item Same Spark engine and SQL/DataFrame API as batch jobs
+    \item Result: each batch's rows appended straight to Hudi
   \end{itemize}
   \vspace{0.25cm}
   \textbf{Fault Tolerance}
   \begin{itemize}\small
-    \item Barrier checkpoints injected into the stream
-    \item \textbf{Exactly-once} with transactional sinks
-    \item State stored in heap or RocksDB
-    \item Fully async — no pause in processing
+    \item Structured Streaming \textbf{checkpoint} tracks processed Kafka offsets and query state
+    \item Persisted to the \texttt{spark-checkpoints} Docker volume — resumes from last committed offset on restart
+    \item Offsets also committed to a \texttt{streamify-<topic>} consumer group purely so lag is visible in Grafana (Spark itself does not depend on that commit to resume)
   \end{itemize}
 \end{columns}
 \end{frame}
 
-\begin{frame}{Flink Setup in Streamify}
+\begin{frame}{Writing to Hudi: Bronze Layer}
 \begin{columns}
   \column{0.48\textwidth}
-  \textbf{Scaled Deployment}
+  \textbf{MERGE\_ON\_READ Bronze Tables}
   \begin{itemize}\small
-    \item \textbf{1 JobManager} — coordinates job scheduling and checkpoints
-    \item \textbf{3 TaskManagers} — each handles one partition of each topic in parallel
-    \item \textbf{Parallelism 3} — matches 3 Kafka partitions exactly
-    \item Slot sharing: one full pipeline per TaskManager
-  \end{itemize}
-  \vspace{0.3cm}
-  \textbf{PyFlink Pipeline}
-  \begin{itemize}\small
-    \item Source: Kafka SQL connector (3 topics)
-    \item Transform: Python UDF — JSON decode, timestamp enrichment
-    \item Sink: Snowflake via JDBC (exactly-once)
-    \item Checkpointing every \textbf{10 seconds} — commits offsets back to Kafka
+    \item Each micro-batch appends to \texttt{staging.<topic>} as a Hudi \textbf{MERGE\_ON\_READ (MOR)} table
+    \item Fast streaming appends land as delta log files, periodically compacted into columnar base files
+    \item Backed by MinIO (dev) or S3 (\texttt{aws} mode) via the Hadoop S3A connector — no rebuild needed to switch
+    \item No separate catalog service — each table self-describes via its \texttt{.hoodie/} metadata directory, (re-)registered into Spark's catalog at job startup
   \end{itemize}
 
   \column{0.48\textwidth}
-  \includegraphics[width=\textwidth]{engine/flink_architecture.png}
+  \includegraphics[width=\textwidth]{engine/spark_micro_batch_latency.png}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Spark Setup in Streamify}
+\begin{columns}
+  \column{0.48\textwidth}
+  \textbf{Shared Standalone Cluster}
+  \begin{itemize}\small
+    \item \textbf{1 master + 2 workers}, 2 cores / 2 GB each — 4 cores total
+    \item \textbf{spark-streaming} job (Kafka $\to$ Hudi bronze), capped at 2 cores
+    \item \textbf{spark-thrift} Thrift Server (dbt SQL submission), capped at 2 cores
+    \item Full cluster used by the two long-running applications — no headroom for ad-hoc Spark SQL at this size
+  \end{itemize}
+  \vspace{0.2cm}
+  \textbf{Streaming Pipeline}
+  \begin{itemize}\small
+    \item Source: Kafka connector (3 topics)
+    \item Transform: fix latin1-mojibake on text fields, derive time columns
+    \item Sink: Hudi bronze tables, MERGE\_ON\_READ
+  \end{itemize}
+
+  \column{0.48\textwidth}
+  \includegraphics[width=\textwidth]{engine/dataflow.png}
 \end{columns}
 \end{frame}
 
 %=============================================================================
-\section{Data Warehouse \& Dashboard}
+\section{Lakehouse \& Dashboard: Hudi, dbt, Superset}
 %=============================================================================
 
-\begin{frame}{Warehouse: Landing Zone $\to$ Gold}
+\begin{frame}{Lakehouse: Bronze $\to$ Star Schema $\to$ Wide Table}
 \begin{columns}
   \column{0.48\textwidth}
   \centering
   \begin{tikzpicture}[node distance=0.5cm, every node/.style={font=\small}]
-    \node[draw, fill=gray!15, rounded corners, minimum width=4.2cm, align=center] (lz)
-      {\textbf{Landing Zone}\\\tiny Raw JSON from Flink via JDBC};
-    \node[draw, fill=orange!20, rounded corners, minimum width=4.2cm, align=center, below=of lz] (br)
-      {\textbf{Bronze}\\\tiny Deduplicated raw records};
+    \node[draw, fill=orange!20, rounded corners, minimum width=4.2cm, align=center] (br)
+      {\textbf{Bronze (Hudi MOR)}\\\tiny Enriched events from Spark Structured Streaming};
     \node[draw, fill=blue!15, rounded corners, minimum width=4.2cm, align=center, below=of br] (si)
-      {\textbf{Silver}\\\tiny Dimension tables + Fact table};
+      {\textbf{Star Schema (Hudi COW)}\\\tiny Dimension tables + Fact table, via dbt};
     \node[draw, fill=yellow!25, rounded corners, minimum width=4.2cm, align=center, below=of si] (go)
-      {\textbf{Gold}\\\tiny Wide table — pre-joined for BI};
-    \draw[-{Stealth}] (lz) -- (br);
+      {\textbf{Wide Table (Hudi COW)}\\\tiny Pre-joined for BI, via dbt};
     \draw[-{Stealth}] (br) -- (si);
     \draw[-{Stealth}] (si) -- (go);
   \end{tikzpicture}
 
   \column{0.48\textwidth}
-  \textbf{Landing Zone}
+  \textbf{Bronze — Streaming Ingest}
   \begin{itemize}\small
-    \item Raw events written directly by Flink — no transformation
+    \item \texttt{staging.<topic>} tables, MERGE\_ON\_READ, written directly by the Spark streaming job
   \end{itemize}
   \vspace{0.15cm}
-  \textbf{Bronze — Deduplication}
-  \begin{itemize}\small
-    \item Remove duplicate events using event ID and timestamp
-  \end{itemize}
-  \vspace{0.15cm}
-  \textbf{Silver — Star Schema}
+  \textbf{Star Schema — dbt (Thrift)}
   \begin{itemize}\small
     \item \texttt{fact\_streams} central fact table
     \item 5 dimension tables: users, songs, artists, locations, datetime
+    \item Materialized as COPY\_ON\_WRITE Hudi tables, rebuilt via full overwrite each run
   \end{itemize}
   \vspace{0.15cm}
-  \textbf{Gold — Wide Table}
+  \textbf{Wide Table — dbt (Thrift)}
   \begin{itemize}\small
     \item \texttt{wide\_streams}: pre-joins fact + all dims
-    \item Single flat table for Power BI — no runtime JOINs
+    \item Single flat table for Superset — no runtime JOINs
   \end{itemize}
 \end{columns}
 \end{frame}
 
+\begin{frame}{Star Schema \& dbt DAG}
+\begin{columns}
+  \column{0.5\textwidth}
+  \centering
+  \includegraphics[width=\textwidth]{app/star_schema.png}
+  \column{0.5\textwidth}
+  \centering
+  \includegraphics[width=\textwidth]{app/dbt_graph.png}
+\end{columns}
+\end{frame}
 
 \begin{frame}{Dashboard: Real-time Insights}
 \begin{columns}
@@ -367,7 +446,7 @@
   \includegraphics[width=\textwidth]{app/dashboard.png}
 
   \column{0.33\textwidth}
-  \textbf{Key Metrics}
+  \textbf{Key Metrics (Superset)}
   \begin{itemize}\small
     \item \textbf{Top artists} by total play count
     \item \textbf{Songs played over time} — hourly trend
@@ -375,25 +454,27 @@
     \item \textbf{Free vs.\ paid} listener split
     \item \textbf{Session activity} — active users over time
   \end{itemize}
+  \vspace{0.2cm}
+  {\small Connected through the same \textbf{Spark Thrift Server} that dbt uses, querying \texttt{wide\_streams} directly.}
 \end{columns}
 \end{frame}
 
 %=============================================================================
-\section{Monitoring}
+\section{Monitoring \& Evaluation}
 %=============================================================================
 
 \begin{frame}{Monitoring: How It Fits Together}
 \begin{center}
 \begin{tikzpicture}[node distance=0.6cm and 1.2cm, every node/.style={font=\small}]
-  \node[draw, fill=BKTemplate!20, rounded corners, minimum width=2.8cm, align=center] (kf) {Apache Kafka\\(3 brokers)};
-  \node[draw, fill=BKTemplate!20, rounded corners, minimum width=2.8cm, align=center, right=1.4cm of kf] (fl) {Apache Flink\\(3 TaskManagers)};
+  \node[draw, fill=BKTemplate!20, rounded corners, minimum width=2.8cm, align=center] (kf) {Apache Kafka\\(2 brokers)};
+  \node[draw, fill=BKTemplate!20, rounded corners, minimum width=2.8cm, align=center, right=1.4cm of kf] (fl) {Spark Standalone\\(streaming + thrift)};
 
   \node[draw, fill=orange!20, rounded corners, minimum width=2.8cm, align=center, below=of kf] (ke) {kafka-exporter\\port 9308};
-  \node[draw, fill=orange!20, rounded corners, minimum width=2.8cm, align=center, below=of fl] (fp) {Flink Prometheus\\reporter port 9249};
+  \node[draw, fill=orange!20, rounded corners, minimum width=2.8cm, align=center, below=of fl] (fp) {Spark Prometheus\\metrics + cAdvisor};
 
   \node[draw, fill=blue!15, rounded corners, minimum width=2.8cm, align=center, below right=0.6cm and -0.7cm of ke] (pr) {Prometheus\\(scrapes every 15s)};
 
-  \node[draw, fill=green!15, rounded corners, minimum width=2.8cm, align=center, below=of pr] (gr) {Grafana\\(3 dashboards)};
+  \node[draw, fill=green!15, rounded corners, minimum width=2.8cm, align=center, below=of pr] (gr) {Grafana\\(2 dashboards)};
 
   \draw[-{Stealth}] (kf) -- (ke);
   \draw[-{Stealth}] (fl) -- (fp);
@@ -409,61 +490,68 @@
   \column{0.48\textwidth}
   \textbf{Why Monitor?}
   \begin{itemize}\small
-    \item Verify Flink throughtput matches Kafka ingestion rate
+    \item Verify Spark streaming throughput matches Kafka ingestion rate
     \item Detect consumer-group lag
-    \item Track CPU and memory anomalies across all 3 TaskManagers and the JobManager
+    \item Track CPU and memory across the 4-core shared Spark cluster (via cAdvisor)
   \end{itemize}
 
   \textbf{Components}
   \begin{itemize}\small
-    \item \textbf{Flink Prometheus Reporter} — exposes JVM and operator metrics on port 9249
+    \item \textbf{Spark's built-in Prometheus metrics} — JVM heap, streaming batch duration/throughput
     \item \textbf{kafka-exporter} — exposes consumer-group lag on port 9308
-    \item \textbf{Prometheus} — scrapes both; stores time-series data
-    \item \textbf{Grafana} — visualises with 3 pre-built dashboards
+    \item \textbf{cAdvisor} — per-container CPU/memory
+    \item \textbf{Prometheus} — scrapes all of it; stores time-series data
+    \item \textbf{Grafana} — visualises with 2 pre-built dashboards
   \end{itemize}
 
   \column{0.48\textwidth}
-  \textbf{3 Grafana Dashboards}
+  \textbf{2 Grafana Dashboards}
   \vspace{0.2cm}
 
-  \begin{block}{Kafka Lag}
-    \small Consumer-group lag per topic + consumption rate (msgs/s) — detects if Flink is falling behind
+  \begin{block}{Kafka Lag (\texttt{kafka-lag.json})}
+    \small Consumer-group lag per topic + consumption rate (msgs/s) — detects if Spark streaming is falling behind
   \end{block}
 
-  \begin{block}{Flink Record Processing}
-    \small Records ingested per second per source operator — confirms data is flowing through the pipeline
-  \end{block}
-
-  \begin{block}{Flink CPU / Memory}
-    \small Per-TaskManager JVM CPU load, heap usage, and managed memory — identifies resource pressure
+  \begin{block}{Spark (\texttt{spark.json})}
+    \small Cluster health, JVM heap, streaming throughput/latency per topic, worker resource usage
   \end{block}
 \end{columns}
 \end{frame}
 
 \begin{frame}{Dashboard: Kafka Consumer Lag}
   \begin{center}
-    \includegraphics[width=0.92\textwidth]{images/monitor/kafka_lag.png}
+    \includegraphics[width=0.92\textwidth]{grafana_kafka.png}
   \end{center}
   \vspace{-0.2cm}
   {\small \textbf{Metric:} \texttt{kafka\_consumergroup\_lag} — consumer-group offset behind the latest partition offset.
-  A lag of 0 means Flink is processing events as fast as Kafka receives them.}
+  A lag of 0 means Spark Structured Streaming is processing events as fast as Kafka receives them.}
 \end{frame}
 
-\begin{frame}{Dashboard: Flink Record Processing}
+\begin{frame}{Dashboard: Spark Monitoring}
   \begin{center}
-    \includegraphics[width=0.92\textwidth]{images/monitor/flink_record_processed.png}
+    \includegraphics[width=0.92\textwidth]{grafana_spark.png}
   \end{center}
   \vspace{-0.2cm}
-  {\small \textbf{Metric:} \texttt{numRecordsOutPerSecond} per source operator — records flowing through each Kafka topic per second, broken down by TaskManager.}
+  {\small \textbf{Metrics:} cluster health, JVM heap, streaming throughput/latency per Kafka topic, per-worker CPU/memory usage.}
 \end{frame}
 
-\begin{frame}{Dashboard: Flink CPU \& Memory}
-  \begin{center}
-    \includegraphics[width=0.92\textwidth]{images/monitor/flink_memory.png}
-  \end{center}
-  \vspace{-0.2cm}
-  {\small \textbf{Metrics:} JVM CPU load, heap used, and Flink managed memory per TaskManager.
-  Managed memory is off-heap (no GC pressure); heap spikes indicate state or UDF object allocation.}
+\begin{frame}{Evaluation: Test Approach}
+  \textbf{Test Environment}
+  \begin{itemize}\small
+    \item Full stack via \texttt{docker compose up} — Kafka (2 brokers), Spark Standalone (1 master + 2 workers), dbt, Superset, Prometheus/Grafana
+    \item Eventsim generating synthetic traffic against the 10,000-song Million Song Dataset subset
+  \end{itemize}
+  \vspace{0.2cm}
+  \textbf{Correctness \& Runtime Checks}
+  \begin{itemize}\small
+    \item Grafana Kafka Lag dashboard confirms the streaming job keeps consumer-group lag near zero
+    \item Grafana Spark dashboard confirms stable JVM heap and per-batch throughput over time
+    \item dbt run/test confirms star-schema and wide-table models build successfully on top of bronze
+  \end{itemize}
+  \vspace{0.2cm}
+  \begin{block}{TODO}
+    \small No benchmark numbers (throughput, latency percentiles, resource utilisation figures) are recorded in this repository yet — add them here once a dedicated load test is run.
+  \end{block}
 \end{frame}
 
 
@@ -473,20 +561,45 @@
 %=============================================================================
 
 \begin{frame}{Conclusion}
-\textbf{Key Takeaways}
+\textbf{Results Achieved}
 \begin{enumerate}\setlength\itemsep{4pt}
-  \item \textbf{Kafka} decouples producers from consumers — 3-node KRaft cluster with 3 partitions per topic enables fault tolerance and parallel consumption
-  \item \textbf{Flink} delivers sub-10 ms latency with exactly-once guarantees — 3 TaskManagers at parallelism 3 match Kafka partitions for maximum throughput
-  \item \textbf{ELT pattern} keeps concerns separate: Flink loads raw events, dbt transforms inside Snowflake through landing $\to$ bronze $\to$ silver $\to$ gold layers
-  \item \textbf{Observability} closes the loop — Prometheus \& Grafana confirm the pipeline is healthy in real time
+  \item \textbf{Kafka} decouples producers from consumers — 2-node KRaft cluster, RF2, 3 partitions per topic gives fault tolerance without a third broker
+  \item \textbf{Spark Structured Streaming} ingests all 3 topics as micro-batches, enriches them, and appends to \textbf{Hudi MERGE\_ON\_READ} bronze tables, resuming from a persisted checkpoint on restart
+  \item \textbf{ELT pattern} keeps concerns separate: Spark loads raw events into Hudi, dbt transforms in place into a star schema and wide table via the Spark Thrift Server
+  \item \textbf{Superset} dashboards and \textbf{Prometheus/Grafana} monitoring close the loop — data is queryable and the pipeline's health is visible in real time
 \end{enumerate}
 
-\vspace{0.3cm}
-\textbf{Future Directions}
-\begin{itemize}
-  \item Migrate to cloud — Confluent Cloud + Kinesis + Snowflake Snowpipe
-  \item Add schema evolution with Confluent Schema Registry + Avro
+\vspace{0.2cm}
+\textbf{Limitations}
+\begin{itemize}\small
+  \item The 4-core Spark Standalone cluster is shared between streaming ingest and the dbt Thrift Server, leaving no headroom for ad-hoc SQL
+  \item Gold-layer dbt models rebuild via full overwrite rather than incremental merge
+  \item No recorded throughput/latency benchmarks yet (see Evaluation)
 \end{itemize}
+
+\vspace{0.2cm}
+\textbf{Future Directions}
+\begin{itemize}\small
+  \item Scale the Spark cluster (more workers/cores) to separate streaming and Thrift-server workloads
+  \item Move gold dbt models to incremental materializations
+  \item Add schema evolution / validation for the incoming Eventsim payloads
+\end{itemize}
+\end{frame}
+
+%=============================================================================
+\section{References}
+%=============================================================================
+
+\begin{frame}{References}
+  \begin{itemize}\small
+    \item Apache Kafka Documentation. \url{https://kafka.apache.org/documentation/}
+    \item Spark Structured Streaming Programming Guide. \url{https://spark.apache.org/docs/latest/structured-streaming-programming-guide.html}
+    \item Apache Hudi Documentation. \url{https://hudi.apache.org/docs/overview}
+    \item dbt Documentation (dbt-spark adapter). \url{https://docs.getdbt.com/docs/core/connect-data-platform/spark-setup}
+    \item Apache Superset Documentation. \url{https://superset.apache.org/docs/intro}
+    \item Eventsim (viirya's fork). \url{https://github.com/viirya/eventsim}
+    \item Million Song Dataset. \url{http://millionsongdataset.com}
+  \end{itemize}
 \end{frame}
 
 % ── The End ───────────────────────────────────────────────────────────────────

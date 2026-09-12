@@ -1,0 +1,19 @@
+\section{Results Achieved}
+
+This project delivered a working, end-to-end streaming lakehouse pipeline: Eventsim-generated events flow through a 2-node Kafka cluster into a Spark Structured Streaming job that lands MERGE\_ON\_READ Hudi bronze tables, which dbt transforms (via the Spark Thrift Server) into a COPY\_ON\_WRITE star schema (\texttt{fact\_streams} and five dimension tables) plus a denormalized \texttt{wide\_streams} table. Apache Superset dashboards query that wide table through the same Thrift Server, and a Prometheus/Grafana/cAdvisor stack monitors Kafka consumer lag and Spark resource usage throughout. The entire stack is reproducible with a single Docker Compose command.
+
+\section{Limitations}
+
+\begin{itemize}
+    \item \textbf{Small, fixed-size cluster.} The Spark Standalone cluster totals only 4 cores, shared between the streaming job and the Thrift Server that dbt uses, leaving no headroom for ad-hoc Spark SQL or additional concurrent workloads.
+    \item \textbf{No autoscaling.} Kafka brokers, Spark workers, and other services are fixed at deployment time; the pipeline does not scale resources up or down in response to load.
+    \item \textbf{Synthetic dataset.} Eventsim generates realistic-looking but entirely synthetic user activity over a fixed 10,000-song catalog, so the pipeline has not been validated against real production traffic patterns or data-quality issues.
+\end{itemize}
+
+\section{Future Directions}
+
+\begin{itemize}
+    \item Replace or augment the synthetic Eventsim data with a real or real-scale streaming dataset to validate the pipeline under realistic data-quality and volume conditions.
+    \item Add autoscaling for the Kafka and Spark clusters (e.g. via a container orchestrator) so cluster capacity can grow with load instead of being fixed at deployment time.
+    \item Extend monitoring and alerting beyond the current Grafana dashboards, e.g. automated alerts on consumer lag thresholds, streaming job failures, or dbt run failures.
+\end{itemize}

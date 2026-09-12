@@ -1,0 +1,132 @@
+% !TEX program = xelatex
+\documentclass[12pt]{report}
+\usepackage[fontsize=13pt]{scrextend}
+\usepackage[a4paper,top=2cm,bottom=2cm,left=3cm,right=2cm]{geometry}
+% \usepackage{svg}
+\usepackage{tgtermes}
+\usepackage{fontspec}
+\usepackage[style=numeric]{biblatex}
+\addbibresource{sections/ref.bib}
+% \usepackage{pgfsys}
+% \usepackage{transparent}
+\setmainfont{Times New Roman}
+\usepackage{eso-pic}
+\usepackage{tikz}
+\usepackage{fancyhdr}
+\usepackage{lastpage}
+\usepackage{tabularx}
+\usepackage{amsmath}
+\usetikzlibrary{positioning}
+\usepackage{anyfontsize}
+\usepackage{float}
+\usepackage{titlesec}
+\usepackage{listings}
+\usepackage{lscape}
+\linespread{1.5}
+\usepackage[hypertexnames=false]{hyperref}
+\usepackage{longtable}
+\hypersetup{
+    colorlinks,
+    citecolor=black,
+    filecolor=black,
+    linkcolor=black,
+    urlcolor=black
+}
+\usepackage{subcaption}
+\usepackage{indentfirst}
+\usepackage{chngcntr}
+\counterwithout{figure}{chapter}
+
+\lstset{
+    basicstyle=\small\ttfamily, % Small font size
+    numbers=left,
+    frame=single,
+}
+\usepackage{pgfplots} % Required for the TikZ figure
+\pgfplotsset{compat=1.18} % Ensure compatibility with the latest version of pgfplots
+
+\newcommand{\Khang}[1]{\textcolor{red!70!pink}{\textbf{\textit{#1}}}}
+
+\graphicspath{{images/}{../image/}}
+
+% Define chapter font size to be 15pt
+\titleformat{\chapter}[display]{\normalfont\huge\bfseries}{\chaptertitlename\ \thechapter}{20pt}{\Huge}
+
+\begin{document}
+
+\input{sections/cover-page}
+\setmainfont{Times New Roman}
+
+\clearpage
+\pagenumbering{roman} 
+
+% \input{sections/ins-signature}
+
+\input{sections/decl-of-authen}
+
+\input{sections/ack}
+
+\input{sections/abstract}
+
+% \input{sections/table-of-glossary}
+
+% \input{sections/list-of-abbreviations}
+
+\input{sections/contents}
+
+\listoftables
+\newpage
+
+\listoffigures
+\newpage
+
+\pagenumbering{arabic}
+
+\chapter{Introduction}
+
+\textit{In chapter 1, the overview, objectives, and goals of the research project are illustrated. The outline of the report is also presented.}
+
+\input{sections/1.Introduction/1.1.Motivation}
+
+\input{sections/1.Introduction/1.2.Goals}
+
+\input{sections/1.Introduction/1.3.Scope}
+
+\input{sections/1.Introduction/1.4.Thesis-structure}
+
+\chapter{Related Works}
+\label{ch:related-work}
+
+\input{sections/2.RelatedWork/2.1.Alternative-technologies}
+
+\chapter{Theoretical Background}
+\label{ch:background}
+
+\input{sections/3.Background/3.1.Core-theory}
+
+\chapter{Problem Statement and Challenges}
+\label{ch:problem-statement}
+
+\input{sections/4.ProblemStatement/4.1.Dataset-and-challenges}
+
+\chapter{Proposed Solution}
+\label{ch:proposed-solution}
+
+\input{sections/6.ProposedSolution/6.1.Architecture}
+
+\chapter{Evaluation and Experiments}
+\label{ch:evaluation}
+
+\input{sections/7.Evaluation/7.1.Test-environment-and-cases}
+
+\chapter{Conclusion}
+\label{ch:conclusion}
+
+\input{sections/5.Conclusion/summary}
+\input{sections/references}
+
+\input{sections/appendixes/appendix}
+\input{sections/appendixes/plan}
+% add appendix later on
+
+\end{document}
