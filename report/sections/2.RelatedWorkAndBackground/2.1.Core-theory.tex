@@ -7,7 +7,19 @@ A modern platform such as a music-streaming service does not produce data in dai
 
 In a traditional batch-processing setup, these events would simply accumulate in a source system and be pulled into the warehouse on a fixed schedule -- once an hour, once a day. Between runs, every dashboard and every downstream decision is working from data that is, on average, half of that interval out of date; right before the next run, it is a full interval out of date. For a platform that wants to react to what users are doing now -- surfacing trending songs, flagging a spike in failed logins, feeding a recommendation engine -- that lag is the problem: the data is correct, just always late.
 
-Real-time (streaming) processing closes this gap. Instead of waiting for a scheduled run, each event is picked up and made queryable within seconds to minutes of happening, so dashboards and downstream models reflect what is happening now rather than what happened last interval. That said, doing this reliably, and not just quickly, is harder than it sounds once the platform has more than one producer and more than one consumer of the same data: events from different partitions can arrive out of order, any component in the chain can crash mid-stream, the same event must not be silently duplicated or dropped on retry, upstream fields will change shape over time, and the storage layer has to serve both a constant stream of small writes and large analytical reads without one starving the other. These are the distributed-systems problems that the rest of this section's concepts exist to solve: a \emph{message queue} for ordered, fault-tolerant ingestion; a \emph{stream processing engine} for continuous, exactly-once processing; and an \emph{open table format} for a storage layer that supports both frequent streaming writes and fast analytical reads.
+Real-time (streaming) processing closes this gap: instead of waiting for a scheduled run, each event is picked up and made queryable within seconds to minutes of happening, so dashboards and downstream models reflect what is happening now rather than what happened last interval. In Streamify, this means a play event lands in its Kafka topic within milliseconds of Eventsim emitting it, and is queryable as a Hudi bronze row one Spark Structured Streaming micro-batch later (Figure~\ref{fig:batch-streaming}) -- typically a few seconds -- rather than at the next hourly or daily load.
+
+Doing this reliably, and not just quickly, is harder than it sounds once the platform has more than one producer and more than one consumer of the same data. Four concrete problems show up:
+
+\begin{itemize}
+    \item \textbf{Ordering.} Events from different partitions of the same topic can arrive and be processed out of order relative to each other.
+    \item \textbf{Fault tolerance.} Any component in the chain -- broker, processing job, storage layer -- can crash mid-stream and must be able to resume without losing data.
+    \item \textbf{Exactly-once delivery.} On a retry after a crash, the same event must not be silently duplicated or dropped.
+    \item \textbf{Schema drift.} Upstream event fields change shape over time (added, renamed, or retyped), and downstream tables must tolerate that without breaking.
+    \item \textbf{Read/write contention.} The storage layer must serve a constant stream of small writes and large analytical reads at the same time, without one starving the other.
+\end{itemize}
+
+These are the distributed-systems problems that the rest of this section's concepts exist to solve: a \emph{message queue} for ordered, fault-tolerant ingestion; a \emph{stream processing engine} for continuous, exactly-once processing; and an \emph{open table format} for a storage layer that supports both frequent streaming writes and fast analytical reads.
 
 \section{Message Queues and Publish-Subscribe Messaging}
 
@@ -20,7 +32,7 @@ Real-time (streaming) processing closes this gap. Instead of waiting for a sched
 
 Event streaming treats data as an unbounded sequence of immutable events (e.g. ``user played a song'') rather than as static rows in a table. A \emph{message queue} built for this pattern is typically a log-based, publish-subscribe (pub-sub) broker, shown in Figure~\ref{fig:message-queue}: producers append events to a durable, ordered log rather than pushing directly to a fixed receiver, and publish them under named \emph{topics}; one or more consumers subscribe to the topics they need and read the log independently, at their own pace. This decouples producers from consumers in both time and number -- a producer does not need a consumer to be running or fast enough to keep up, and any number of independent consumers can read the same retained events without the broker deleting them on delivery.
 
-\section{Stream Processing Engines}
+\section{Batch and Streaming Processing Engines}
 
 \begin{figure}[H]
     \centering
@@ -29,14 +41,18 @@ Event streaming treats data as an unbounded sequence of immutable events (e.g. `
     \label{fig:batch-streaming}
 \end{figure}
 
-A stream processing engine continuously reads from a message queue, applies transformations, and writes results, without waiting for a full batch of data to accumulate first. Figure~\ref{fig:batch-streaming} contrasts this against traditional batch processing. Two execution models are used in practice:
+A \emph{batch processing engine} operates on a bounded, complete dataset that is already at rest: it reads the full input, runs the job once end to end, produces its output, and stops until the next scheduled run.
+
+A \emph{stream processing engine} instead operates on an unbounded dataset that keeps arriving: it stays running indefinitely, continuously reading new events from a message queue, applying the same kind of transformation logic (filtering, aggregation, joins) to them, and writing results incrementally as they are produced, rather than waiting for a full batch to accumulate first. Figure~\ref{fig:batch-streaming} contrasts the two.
+
+A stream processing engine can still process its unbounded input using either of two execution models:
 
 \begin{itemize}
     \item \textbf{Event-at-a-time.} Each event is processed as soon as it arrives, giving the lowest possible per-event latency.
     \item \textbf{Micro-batching.} The engine groups whatever new data has arrived since the last run into a small, discrete batch job on a fixed trigger interval, and processes that batch with the same execution engine used for ordinary batch queries. This reuses a mature batch engine's query planning and fault tolerance, at the cost of end-to-end latency being bounded by the trigger interval rather than being instantaneous.
 \end{itemize}
 
-Either model reads its input positions (offsets) from the upstream message queue and applies the same kind of transformation logic (filtering, aggregation, joins) to produce an output.
+Either execution model still reads its input positions (offsets) from the upstream message queue, and both keep the engine running continuously -- the distinction from batch processing is not how the input is chopped up, but that the engine never stops waiting for the next event.
 
 \section{Storage layer \& Open Table Formats}
 \label{sec:core-theory}
@@ -48,7 +64,15 @@ Either model reads its input positions (offsets) from the upstream message queue
     \label{fig:storage-layer}
 \end{figure}
 
-Object storage (S3, MinIO, HDFS, ...) is a cheap, scalable, and durable way to store large amounts of data, but it is not a database: it does not provide row-level insert/update/delete semantics, ACID transactions, or time-travel queries. An \emph{open table format} adds those capabilities on top of plain files in object storage, so a lake of files behaves like a table rather than an unmanaged pile of Parquet, as shown in Figure~\ref{fig:storage-layer}.
+As Figure~\ref{fig:storage-layer} shows, a lakehouse's underlying storage is one of three kinds:
+
+\begin{itemize}
+    \item \textbf{Object storage.} Data is stored as whole objects in flat buckets, addressed by key rather than by a filesystem path (e.g. S3, MinIO). This is the layer a lakehouse is built on.
+    \item \textbf{Block storage.} Data is stored in fixed-size blocks that an operating system assembles into a filesystem, as used by a traditional database's local disk.
+    \item \textbf{File storage.} Data is stored hierarchically as files in a shared, path-addressed filesystem (e.g. HDFS, NFS).
+\end{itemize}
+
+A lakehouse is built on object storage because it is cheap, horizontally scalable, and durable, but plain object storage is not a database: it does not provide row-level insert/update/delete semantics, ACID transactions, or time-travel queries -- it only stores and returns whole objects. An \emph{open table format} adds those capabilities on top of plain files in object storage, so a lake of files behaves like a table rather than an unmanaged pile of Parquet.
 
 \begin{figure}[H]
     \centering
@@ -75,4 +99,12 @@ MOR suits high-frequency streaming appends, where write latency matters most; CO
     \label{fig:medallion}
 \end{figure}
 
-The medallion architecture, shown in Figure~\ref{fig:medallion}, organizes a lakehouse into successive layers of increasing refinement, conventionally named bronze, silver, and gold. \emph{Bronze} tables hold raw or lightly-cleaned data close to its source form, written as-is by the ingestion layer. \emph{Gold} tables hold data that has been modeled and aggregated into the shape consumers (BI tools, dashboards) actually query, typically built by a transformation layer reading from bronze. This project uses the bronze and gold terms in that sense throughout.
+The medallion architecture, shown in Figure~\ref{fig:medallion}, organizes a lakehouse into three successive layers of increasing refinement: bronze, silver, and gold.
+
+\begin{itemize}
+    \item \textbf{Bronze} tables hold raw or lightly-cleaned data close to its source form, written as-is by the ingestion layer.
+    \item \textbf{Silver} tables hold data that has been cleaned, deduplicated, and conformed to a consistent schema, but not yet aggregated or reshaped for a specific consumer.
+    \item \textbf{Gold} tables hold data that has been modeled and aggregated into the shape consumers (BI tools, dashboards) actually query, typically built by a transformation layer reading from silver (or, when a project skips silver, directly from bronze).
+\end{itemize}
+
+This project uses only the bronze and gold layers: dbt reads directly from bronze and builds the gold star schema and wide table in one step (Section~\ref{sec:transformation-layer}), since the dataset is small and clean enough that a separate silver cleaning stage would add no value.

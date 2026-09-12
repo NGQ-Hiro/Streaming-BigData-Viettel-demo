@@ -1,6 +1,6 @@
 \section{Scope}
 
-This project covers the full path from synthetic event generation to dashboarding: Eventsim event generation, Kafka ingestion, Spark Structured Streaming processing into Hudi bronze tables, dbt transformation into a star schema and wide table, Superset dashboarding, and Prometheus/Grafana monitoring of the pipeline's own health (Chapter~\ref{ch:proposed-solution}). All of these components are deployed and demonstrated together via Docker Compose on a single machine.
+This project covers the full path from synthetic event generation to dashboarding: Eventsim event generation, Kafka ingestion, Spark Structured Streaming processing into Hudi bronze tables, dbt transformation into a star schema and wide table, Superset dashboarding, and Prometheus/Grafana monitoring of the pipeline's own health (Chapter~\ref{ch:proposed-solution}). Within this path, the scope also includes the distributed-systems concerns the course covers -- partitioning, replication, checkpointed exactly-once processing, and consumer-lag monitoring (Section~\ref{sec:core-theory}) -- rather than just wiring the tools together. All of these components are deployed and demonstrated together via Docker Compose on a single machine.
 
 The following are explicitly out of scope:
 
