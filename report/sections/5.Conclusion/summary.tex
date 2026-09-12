@@ -4,7 +4,7 @@ This project delivered a working, end-to-end streaming lakehouse pipeline: Event
 
 \section{Summary of Design Decisions}
 
-Table~\ref{tab:design-decisions} summarizes the major technology choices made throughout this project, the alternatives considered for each, and the trade-off that decided the outcome. The ingestion, stream-processing, and storage/table-format choices are discussed in full in Chapter~\ref{ch:related-work}; the remaining choices are discussed alongside the layer they belong to in Chapter~\ref{ch:proposed-solution}.
+Table~\ref{tab:design-decisions} summarizes the major technology choices made throughout this project, the alternatives considered for each, and the trade-off that decided the outcome. The ingestion, stream-processing, and storage/table-format choices are discussed in full in Chapter~\ref{ch:related-work-background}; the remaining choices are discussed alongside the layer they belong to in Chapter~\ref{ch:proposed-solution}.
 
 \begin{table}[H]
     \centering
@@ -14,13 +14,13 @@ Table~\ref{tab:design-decisions} summarizes the major technology choices made th
         \hline
         \textbf{Decision} & \textbf{Alternatives considered} & \textbf{Deciding trade-off} \\
         \hline
-        Kafka for ingestion & HTTP/REST push, RabbitMQ & Durable, replayable log with per-consumer-group offsets vs.\ no built-in replay (Section~\ref{sec:kafka-vs-alt}) \\
+        Kafka for ingestion & HTTP/REST push, RabbitMQ & Durable, replayable log with per-consumer-group offsets vs.\ no built-in replay (Chapter~\ref{ch:proposed-solution}) \\
         \hline
-        2-node KRaft, RF2 & Single broker, larger cluster & Smallest sizing giving any broker fault tolerance, within a single-machine budget (Section~\ref{sec:kafka-sizing}) \\
+        2-node KRaft, RF2 & Single broker, larger cluster & Smallest sizing giving any broker fault tolerance, within a single-machine budget (Chapter~\ref{ch:proposed-solution}) \\
         \hline
-        Spark Structured Streaming & Apache Flink & Shared engine/cluster with dbt batch jobs vs.\ Flink's lower per-event latency (Section~\ref{sec:flink-vs-spark}) \\
+        Spark Structured Streaming & Apache Flink & Shared engine/cluster with dbt batch jobs vs.\ Flink's lower per-event latency (Chapter~\ref{ch:proposed-solution}) \\
         \hline
-        Hudi (MOR bronze / COW gold) & Plain Parquet, Delta Lake/Iceberg, Snowflake & Self-describing tables, no extra catalog/warehouse service; MOR write cost vs.\ COW read cost (Section~\ref{sec:storage-format}) \\
+        Hudi (MOR bronze / COW gold) & Plain Parquet, Delta Lake/Iceberg, Snowflake & Self-describing tables, no extra catalog/warehouse service; MOR write cost vs.\ COW read cost (Chapter~\ref{ch:proposed-solution}) \\
         \hline
         dbt for transformation & Hand-written Spark SQL scripts & Declared dependencies, built-in tests, and generated docs vs.\ manual scripting (Section~\ref{sec:transformation-layer}) \\
         \hline

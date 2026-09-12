@@ -3,11 +3,8 @@
 The remainder of this report is organized as follows:
 
 \begin{itemize}
-    \item \textbf{Chapter~\ref{ch:related-work}, Related Works,} reviews alternative technologies considered for each stage of the pipeline and the reasons for the choices made in this project.
-    \item \textbf{Chapter~\ref{ch:background}, Theoretical Background,} covers the core concepts behind the pipeline: event streaming and pub-sub messaging, Spark Structured Streaming's micro-batch model, Hudi's MERGE\_ON\_READ and COPY\_ON\_WRITE table formats, and star-schema dimensional modeling.
+    \item \textbf{Chapter~\ref{ch:related-work-background}, Related Work and Background Theory,} first covers the core concepts behind the pipeline -- event streaming and pub-sub messaging, Spark Structured Streaming's micro-batch model, Hudi's table formats, and data modeling.
     \item \textbf{Chapter~\ref{ch:problem-statement}, Problem Statement and Challenges,} describes the dataset used and the technical challenges of building a fault-tolerant streaming pipeline on a small, shared compute cluster.
     \item \textbf{Chapter~\ref{ch:proposed-solution}, Proposed Solution,} presents the system architecture, the implementation workflow, and the cluster/environment setup.
-    \item \textbf{Chapter~\ref{ch:evaluation}, Evaluation and Experiments,} describes the test environment, test cases, and monitoring evidence gathered.
     \item \textbf{Chapter~\ref{ch:conclusion}, Conclusion,} summarizes the results achieved, current limitations, and directions for future work.
 \end{itemize}
-
