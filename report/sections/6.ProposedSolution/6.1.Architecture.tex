@@ -39,6 +39,13 @@ Figure~\ref{fig:overview} shows the end-to-end architecture: Eventsim generates 
 
 The remainder of this chapter walks through the pipeline one layer at a time -- ingestion, stream processing, storage, transformation, and serving -- followed by how the whole stack is deployed. Each layer section closes with a short note on why that specific tool was chosen, cross-referencing the fuller alternatives-and-trade-offs discussion in Chapter~\ref{ch:related-work-background}.
 
+
+\section{Storage Layer}
+
+Tables are Hudi-managed, backed by MinIO~\cite{minio}/S3 locally or real S3 in \texttt{aws} mode via the Hadoop S3A connector, with no rebuild needed to switch between the two -- only an environment variable (\texttt{LAKE\_ENV}). There is no separate catalog service: each table is self-describing at its storage path (a \texttt{.hoodie/} metadata directory) and is (re-)registered into Spark's catalog idempotently at job startup. Bronze tables use the MERGE\_ON\_READ table type, so fast streaming appends land as delta log files that are periodically compacted into columnar base files; gold and seed tables use COPY\_ON\_WRITE, rebuilt via full overwrite.
+
+\textbf{Why Hudi, and why MOR bronze / COW gold.} Hudi's self-describing \texttt{.hoodie/} metadata avoids the extra catalog or warehouse service that plain Parquet or Snowflake would require. Bronze uses MOR to keep frequent streaming appends cheap; gold uses COW because it is rebuilt once per run and then read repeatedly by Superset.
+
 \section{Ingestion Layer}
 
 \begin{figure}[H]
@@ -78,12 +85,6 @@ The streaming job runs as a driver program submitted to the Spark Standalone clu
 
 Structured Streaming resumes from a persisted checkpoint volume (\texttt{spark-checkpoints}) on restart; each micro-batch also commits its Kafka offsets to a \texttt{streamify-<topic>} consumer group purely so lag is visible in Grafana (Spark itself never depends on that commit to resume).
 
-\section{Storage Layer}
-
-Tables are Hudi-managed, backed by MinIO~\cite{minio}/S3 locally or real S3 in \texttt{aws} mode via the Hadoop S3A connector, with no rebuild needed to switch between the two -- only an environment variable (\texttt{LAKE\_ENV}). There is no separate catalog service: each table is self-describing at its storage path (a \texttt{.hoodie/} metadata directory) and is (re-)registered into Spark's catalog idempotently at job startup. Bronze tables use the MERGE\_ON\_READ table type, so fast streaming appends land as delta log files that are periodically compacted into columnar base files; gold and seed tables use COPY\_ON\_WRITE, rebuilt via full overwrite.
-
-\textbf{Why Hudi, and why MOR bronze / COW gold.} Hudi's self-describing \texttt{.hoodie/} metadata avoids the extra catalog or warehouse service that plain Parquet or Snowflake would require. Bronze uses MOR to keep frequent streaming appends cheap; gold uses COW because it is rebuilt once per run and then read repeatedly by Superset.
-
 \section{Transformation Layer}
 \label{sec:transformation-layer}
 
@@ -112,7 +113,6 @@ Rather than hand-writing this as Spark job code, dbt~\cite{dbt} acts as a SQL ab
 
 \textbf{Why dbt, and why both a star schema and a wide table.} dbt was chosen over a layer of hand-written Spark SQL scripts because it declares model dependencies explicitly (via \texttt{ref()}/\texttt{source()}), runs a built-in test framework against every model (uniqueness, not-null, referential integrity), generates documentation from the same source files, and is friendlier to iterate on during development -- properties that matter given the five-dimension join the fact table depends on. Modelling both a star schema and a separate wide table, rather than either alone, keeps normalization and storage efficiency in the star schema while keeping BI query simplicity in \texttt{wide\_streams}, instead of trading one off against the other.
 
-
 \section{Serving Layer}
 \label{sec:serving-layer}
 
@@ -126,7 +126,6 @@ Rather than hand-writing this as Spark job code, dbt~\cite{dbt} acts as a SQL ab
 Apache Superset~\cite{superset} connects to the same Spark Thrift Server that dbt submits SQL through, querying the \texttt{wide\_streams} model to visualize insights through interactive dashboards (\texttt{superset/provision\_dashboard.py} provisions them via the REST API). Figure~\ref{fig:results-dashboard} shows the resulting dashboard layout, giving end users a single, pre-joined table to explore without needing to understand the star schema behind it.
 
 Superset ships a native Thrift/HiveServer2-compatible connector that talks directly to the Spark Thrift Server endpoint already used by dbt, needing no extra license or gateway infrastructure, unlike Power BI or Tableau.
-
 
 \section{Monitoring Layer}
 \label{sec:monitoring-layer}
