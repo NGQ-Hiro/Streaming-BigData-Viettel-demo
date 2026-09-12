@@ -2,6 +2,7 @@
 This section introduces the general concepts behind a streaming lakehouse -- message queues, stream processing engines, open table formats, and dimensional modeling -- independent of any one product. Chapter~\ref{ch:proposed-solution} then explains which concrete tool implements each concept in this project, and why that tool was chosen over its alternatives.
 
 \section{Why Real-Time Processing Matters}
+\label{sec:why-realtime}
 
 A modern platform such as a music-streaming service does not produce data in daily batches: it produces a continuous stream of small events -- a song played, a page viewed, a login -- the instant a user acts. Streamify, the project this report builds, simulates exactly this kind of platform with Eventsim, which generates synthetic ``song played'', ``page view'', and ``authentication'' events for a fake music website at a steady, ongoing rate.
 

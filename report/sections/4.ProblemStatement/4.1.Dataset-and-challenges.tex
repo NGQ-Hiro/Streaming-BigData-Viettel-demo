@@ -1,10 +1,29 @@
-\section{Dataset}
+\section{The Problem Before Streaming Lakehouses}
+\label{sec:problem-before-lakehouses}
 
-The pipeline is driven by \href{https://github.com/Interana/eventsim}{Eventsim}, a synthetic event generator that simulates page-request and listening activity on a fake music-streaming website (the Docker image used is \href{https://github.com/viirya/eventsim}{viirya's fork} of the original, unmaintained project). Eventsim draws its song catalog from the \href{http://millionsongdataset.com}{Million Song Dataset}; this project uses the official \href{http://millionsongdataset.com/pages/getting-dataset/\#subset}{10,000-song subset}. The generated events (\texttt{listen\_events}, \texttt{page\_view\_events}, \texttt{auth\_events}) look like real user-activity logs but are entirely synthetic, which makes them safe to publish and reproduce without any user-privacy concern.
+Chapter~\ref{ch:related-work-background} introduced the pieces a streaming lakehouse is built from: message queues, stream processing engines, open table formats, and medallion layering. None of these are new inventions on their own -- what is comparatively recent is combining them into a single pattern. Before that combination existed, teams that wanted both fresh data and a queryable, transactional lake had to work around four gaps, described below.
+
+\subsection{Latency of Batch ETL}
+
+As Section~\ref{sec:why-realtime} already covers, a warehouse fed by scheduled batch loads is always some distance behind reality: dashboards and models reflect the last load, not the current state of the system. This was simply accepted as the cost of running a warehouse-centric stack, because the tools available -- scheduled ETL jobs writing into a warehouse -- had no continuous alternative.
+
+\subsection{Lambda-Architecture Complexity}
+
+The historical fix for that lag was the \emph{lambda architecture}: a batch layer computing correct, complete results on a schedule, and a separate real-time \emph{speed layer} computing approximate, low-latency results in between batch runs, with the two reconciled downstream. The catch is that the speed layer and the batch layer are usually two different systems with two different codebases, both implementing the same business logic. Keeping them consistent means writing every transformation twice and manually verifying the two never drift apart -- an ongoing operational cost and a recurring source of subtle bugs whenever one side changes and the other does not.
+
+\subsection{No Serving Layer on the Data Lake}
+
+Plain object storage holding raw files (Parquet on S3 or HDFS, without an open table format on top) has no row-level insert, update, or delete, no ACID transactions, and no time travel -- it can only store and return whole objects, as Section~\ref{sec:core-theory} explains. In practice this made the lake a read-only, append-only dump: useful for cheap bulk storage, but unusable as a serving layer for anything that needed a consistent, updatable view of the data. Any workload that needed transactional guarantees had to bypass the lake entirely and go through a separate data warehouse, adding a second copy of the data and another ETL hop to keep it in sync.
+
+\subsection{Storage and Compute Coupled in the Warehouse}
+
+Traditional data warehouses bundle storage and compute into one system, so scaling one means paying for the other whether it is needed or not. Combined with the previous point, this pushed teams into keeping two copies of the same data: a cheap, raw copy in the lake, and a structured, query-ready copy in the warehouse, doubling both storage cost and the pipeline work needed to keep the copies aligned.
+
+Combining a stream processing engine with an open table format (Section~\ref{sec:core-theory}) closes this gap: bronze tables backed by object storage stay cheap, gain COW/MOR transactional writes and upserts, and are fed continuously by a streaming engine rather than on a batch schedule -- the \emph{streaming lakehouse} this report builds.
 
 \section{Technical Challenges}
 
-Building a streaming lakehouse pipeline on top of this dataset raised the following challenges.
+Section~\ref{sec:problem-before-lakehouses} argued why the streaming-lakehouse paradigm itself is needed. This section is about a different, narrower question: what was concretely hard about building \emph{this} pipeline on top of that paradigm. Streamify's data source is Eventsim, which continuously emits synthetic music-streaming events across three Kafka topics -- \texttt{listen\_events}, \texttt{page\_view\_events}, and \texttt{auth\_events} -- rather than arriving in scheduled batches. Building a streaming lakehouse pipeline on top of this dataset surfaces, in a small and reproducible setting, the same distributed-systems problems introduced in Section~\ref{sec:why-realtime}: keeping up with a continuous arrival rate, tolerating faults without losing or duplicating data, sharing a fixed compute budget, and handling messy real-world join keys. The rest of this section works through each one as it appears in this project.
 
 \subsection{Streaming Volume and Velocity}
 
@@ -17,7 +36,3 @@ Kafka runs as a 2-node KRaft cluster (no ZooKeeper), with each topic replicated 
 \subsection{Computing and Partitioning on a Small, Shared Spark Cluster}
 
 The Spark Standalone cluster totals only 4 cores across one master and two workers (2 cores / 2 GB each), and those 4 cores are shared between two long-running applications: the Spark Structured Streaming ingestion job (capped at 2 cores) and the Spark Thrift Server that dbt submits its SQL transformations through (also capped at 2 cores). This leaves no spare capacity for ad-hoc Spark SQL at this cluster size, and means both the streaming job's micro-batch partitioning and dbt's batch transformation jobs must fit within their fixed 2-core budget rather than being able to scale out elastically.
-
-\subsection{Dirty Keys Breaking Dimensional Joins}
-
-Eventsim's raw event fields are not clean enough to join on directly. Text fields such as \texttt{artist} and \texttt{song} arrive with latin1-mojibake encoding, which the streaming job corrects before the bronze tables are written. Even after that correction, the same artist and song names carry stray quote and backslash characters that differ inconsistently between the \texttt{listen\_events} stream and the artist/song dimension source, so \texttt{fact\_streams} cannot join on the raw strings: it strips quotes and backslashes from both sides of the join (\texttt{REPLACE(REPLACE(artist, '"', ''), '\textbackslash{}\textbackslash{}', '')}) before matching against \texttt{dim\_artists} and \texttt{dim\_songs}. This is a concrete instance of a broader challenge for the pipeline: dimensional joins are only as reliable as the string normalization applied to their join keys, and that normalization has to be decided and implemented explicitly rather than assumed.

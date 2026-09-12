@@ -52,8 +52,6 @@ Eventsim simulates a real-world user base, generating page-view and song-play ev
 
 Because KRaft mode is used, each broker itself also acts as a metadata/controller node, removing the need for a separate ZooKeeper ensemble. For each topic, the 3 partitions are spread across the two brokers, and because replication factor is 2, every partition is fully replicated: one broker holds the leader replica for a given partition and the other holds the follower replica, and the two brokers swap this role across partitions so that neither broker is leader for every partition of a topic. Producers (Eventsim) and consumers (the Spark Structured Streaming job) always read from and write to the leader replica of a partition; the follower replica only pulls data from the leader to stay in sync, and takes over as leader if its broker fails. This is what gives the cluster broker-level fault tolerance despite running on just two nodes.
 
-\textbf{Why Kafka, and why this sizing.} Kafka's durable, partitioned log and per-consumer-group offsets let Structured Streaming resume ingestion exactly where it left off after a restart, which a direct HTTP push or a traditional queue such as RabbitMQ does not provide as directly. The 2-node, replication-factor-2 sizing is the smallest configuration that gives the cluster any broker-level fault tolerance at all, chosen over a single broker (no fault tolerance) or a larger cluster (more resource cost than this project's single-machine deployment justifies).
-
 \section{Stream \& Batch Processing Layer}
 
 \begin{figure}[H]
@@ -125,14 +123,13 @@ Rather than hand-writing this as Spark job code, dbt~\cite{dbt} acts as a SQL ab
     \label{fig:results-dashboard}
 \end{figure}
 
-Apache Superset~\cite{superset} connects to the same Spark Thrift Server that dbt submits SQL through, querying the \texttt{wide\_streams} model to visualize insights through interactive dashboards (\texttt{superset/provision\_dashboard.py} provisions them via the REST API). Figure~\ref{fig:results-dashboard} shows the resulting dashboard layout.
+Apache Superset~\cite{superset} connects to the same Spark Thrift Server that dbt submits SQL through, querying the \texttt{wide\_streams} model to visualize insights through interactive dashboards (\texttt{superset/provision\_dashboard.py} provisions them via the REST API). Figure~\ref{fig:results-dashboard} shows the resulting dashboard layout, giving end users a single, pre-joined table to explore without needing to understand the star schema behind it.
 
-Prometheus scrapes Kafka consumer-group lag (via kafka-exporter), Spark's built-in Prometheus metrics, and per-container stats (via cAdvisor); Grafana visualizes all of it across dashboards.
-
-\textbf{Why Superset.} Superset ships a native Thrift/HiveServer2-compatible connector that talks directly to the Spark Thrift Server endpoint already used by dbt, needing no extra license or gateway infrastructure, unlike Power BI or Tableau.
+Superset ships a native Thrift/HiveServer2-compatible connector that talks directly to the Spark Thrift Server endpoint already used by dbt, needing no extra license or gateway infrastructure, unlike Power BI or Tableau.
 
 
-\section{Monitoring Cluster}
+\section{Monitoring Layer}
+\label{sec:monitoring-layer}
 
 \begin{figure}[H]
     \centering
@@ -148,7 +145,7 @@ Prometheus scrapes Kafka consumer-group lag (via kafka-exporter), Spark's built-
     \label{fig:grafana-spark}
 \end{figure}
 
-The Grafana dashboards backed by Prometheus, shown in Figures~\ref{fig:grafana-kafka} and~\ref{fig:grafana-spark}, provide qualitative evidence of the pipeline's throughput and health under load, rather than a formal benchmark. Together they capture the consumer-group lag and consumption rate per topic, as well as Spark streaming/batch job metrics, JVM heap usage, and per-container CPU/memory usage.
+Three exporters feed the same Prometheus instance: kafka-exporter scrapes each consumer group's per-partition lag directly from Kafka, Spark's built-in metrics endpoint exposes streaming/batch job counters and JVM heap usage, and cAdvisor reports per-container CPU and memory for every service in the stack. Grafana queries Prometheus and renders the two dashboards in Figures~\ref{fig:grafana-kafka} and~\ref{fig:grafana-spark}: Kafka consumer-group lag and consumption rate per topic, and Spark job/JVM/container metrics. This gives qualitative evidence of the pipeline's throughput and health under load, rather than a formal benchmark.
 
 \section{Deployment \& Environment}
 \label{sec:proposed-cluster-setup}

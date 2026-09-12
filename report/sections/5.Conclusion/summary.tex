@@ -1,6 +1,8 @@
 \section{Results Achieved}
 
-This project delivered a working, end-to-end streaming lakehouse pipeline: Eventsim-generated events flow through a 2-node Kafka cluster into a Spark Structured Streaming job that lands MERGE\_ON\_READ Hudi bronze tables, which dbt transforms (via the Spark Thrift Server) into a COPY\_ON\_WRITE star schema (\texttt{fact\_streams} and five dimension tables) plus a denormalized \texttt{wide\_streams} table. Apache Superset dashboards query that wide table through the same Thrift Server, and a Prometheus/Grafana/cAdvisor stack monitors Kafka consumer lag and Spark resource usage throughout. The entire stack is reproducible with a single Docker Compose command.
+This project achieved its core goal: understanding, first-hand rather than from a diagram, how a modern streaming platform actually works end to end. Building the pipeline meant learning why a Kafka partition needs a follower replica and how that replica takes over on a broker failure, why Structured Streaming's checkpoint has to be separate from the consumer-group offset it also commits, when MERGE\_ON\_READ is worth its read-time merge cost over COPY\_ON\_WRITE, and how a fixed, shared compute budget forces every downstream decision -- bronze table layout, how many dbt models to run, how often a dashboard can refresh -- to fit inside that budget rather than assuming elastic scale.
+
+It also achieved the goal of applying the distributed-systems concepts from the course to a real system instead of studying them in the abstract: partitioning and replication, checkpointed exactly-once processing, and consumer-lag observability were each exercised against a real failure mode, not just described. In doing so, the project confirmed in practice why the streaming-lakehouse combination closes the gaps identified in Section~\ref{sec:problem-before-lakehouses} -- no separate lambda-architecture speed layer duplicating logic, a lake that is transactionally updatable instead of a read-only dump, and storage and compute that scale independently -- and it did so reproducibly, with the whole stack coming up from a single Docker Compose command.
 
 \section{Limitations}
 
@@ -16,4 +18,5 @@ This project delivered a working, end-to-end streaming lakehouse pipeline: Event
     \item Replace or augment the synthetic Eventsim data with a real or real-scale streaming dataset to validate the pipeline under realistic data-quality and volume conditions.
     \item Add autoscaling for the Kafka and Spark clusters (e.g. via a container orchestrator) so cluster capacity can grow with load instead of being fixed at deployment time.
     \item Extend monitoring and alerting beyond the current Grafana dashboards, e.g. automated alerts on consumer lag thresholds, streaming job failures, or dbt run failures.
+    \item Add a silver layer between bronze and gold once source schemas or data quality no longer stay clean enough for dbt to model gold directly from bronze.
 \end{itemize}
