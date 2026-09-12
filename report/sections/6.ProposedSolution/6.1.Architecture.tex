@@ -1,4 +1,4 @@
-\section{System Architecture}
+\section{Architecture Overview}
 
 Figure~\ref{fig:overview} shows the end-to-end architecture: Eventsim generates events into a Kafka cluster, Spark Structured Streaming consumes and lands them as Hudi bronze tables, dbt transforms the bronze layer into a star schema and a wide table on the same Spark cluster, and Superset visualizes the result through the Spark Thrift Server, alongside a Prometheus/Grafana monitoring stack.
 
@@ -38,46 +38,19 @@ Figure~\ref{fig:overview} shows the end-to-end architecture: Eventsim generates 
     \end{tabularx}
 \end{table}
 
-\section{Implementation Workflow}
+The remainder of this chapter walks through the pipeline one layer at a time -- ingestion, stream processing, storage, transformation, and serving -- followed by how the whole stack is deployed. Each layer section closes with a short note on why that specific tool was chosen, cross-referencing the fuller alternatives-and-trade-offs discussion in Chapter~\ref{ch:related-work}.
 
-The pipeline runs as the following seven stages:
+\section{Ingestion Layer}
 
-\begin{enumerate}
-    \item \textbf{Data simulation (Eventsim).} Eventsim simulates a real-world user base, generating page-view and song-play events.
-    \item \textbf{Ingestion and messaging (Kafka).} Apache Kafka 4.3 runs in KRaft mode (no ZooKeeper) as a 2-node cluster. Each topic has 3 partitions with replication factor 2 for fault tolerance.
-    \item \textbf{Real-time processing (Spark Structured Streaming).} A long-running Spark job consumes all three topics, fixes latin1-mojibake on text fields, derives time columns, and appends each micro-batch to bronze Hudi tables (\texttt{staging.<topic>}), using the MERGE\_ON\_READ table type so streaming appends land as delta log files that are periodically compacted into columnar base files.
-    \item \textbf{Lakehouse storage (Hudi).} Tables are Hudi-managed, backed by MinIO/S3 locally or real S3 in \texttt{aws} mode via the Hadoop S3A connector, with no rebuild needed to switch. There is no separate catalog service: each table is self-describing at its storage path (a \texttt{.hoodie/} metadata directory) and is (re-)registered into Spark's catalog idempotently at job startup.
-    \item \textbf{Data transformation (dbt).} dbt~\cite{dbt} connects to the Spark cluster via the Spark Thrift Server (\texttt{method: thrift}) and builds a star schema plus a denormalized wide table directly on top of the bronze Hudi tables, materialized as COPY\_ON\_WRITE Hudi tables rebuilt via full overwrite each run.
-    \item \textbf{Business intelligence (Superset).} Apache Superset~\cite{superset} connects to the same Spark Thrift Server, querying the \texttt{wide\_streams} model to visualize insights through interactive dashboards.
-    \item \textbf{Monitoring (Prometheus and Grafana).} Prometheus scrapes Kafka consumer-group lag (via kafka-exporter), Spark's built-in Prometheus metrics, and per-container stats (via cAdvisor); Grafana visualizes all of it across dashboards.
-\end{enumerate}
+Eventsim simulates a real-world user base, generating page-view and song-play events that mimic activity on a music-streaming website. Apache Kafka 4.3 runs in KRaft mode (no ZooKeeper) as a 2-node cluster (\texttt{broker-1}, \texttt{broker-2}). Each of the three event topics -- \texttt{listen\_events}, \texttt{page\_view\_events}, \texttt{auth\_events} -- has 3 partitions and replication factor 2, so every partition has a replica on both brokers.
 
-\subsection{Star Schema and Wide Table}
+\textbf{Why Kafka, and why this sizing.} Kafka's durable, partitioned log and per-consumer-group offsets let Structured Streaming resume ingestion exactly where it left off after a restart, which a direct HTTP push or a traditional queue such as RabbitMQ does not provide as directly (Section~\ref{sec:kafka-vs-alt}). The 2-node, replication-factor-2 sizing is the smallest configuration that gives the cluster any broker-level fault tolerance at all, chosen over a single broker (no fault tolerance) or a larger cluster (more resource cost than this project's single-machine deployment justifies) (Section~\ref{sec:kafka-sizing}).
 
-dbt builds two model layers on top of the bronze Hudi tables:
+\section{Stream Processing Layer}
 
-\begin{itemize}
-    \item \textbf{Star schema.} One fact table, \texttt{fact\_streams}, joined to five dimension tables: \texttt{dim\_users}, \texttt{dim\_songs}, \texttt{dim\_artists}, \texttt{dim\_locations}, and \texttt{dim\_datetime}. This is the normalized, storage-efficient model (Section~\ref{sec:core-theory}).
-    \item \textbf{Wide table (\texttt{wide\_streams}).} A denormalized table built from the star schema by pre-joining \texttt{fact\_streams} with all five dimension tables, so that Superset can query a single flat table instead of performing joins at dashboard-query time.
-\end{itemize}
+A long-running Spark Structured Streaming job consumes all three Kafka topics, fixes latin1-mojibake on text fields, derives time columns, and appends each micro-batch to bronze Hudi tables (\texttt{staging.<topic>}).
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.7\textwidth]{star_schema.png}
-    \caption{Star schema: \texttt{fact\_streams} and its five dimension tables.}
-    \label{fig:star-schema}
-\end{figure}
-
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.7\textwidth]{dbt_graph.png}
-    \caption{dbt DAG showing the dependency between bronze sources, the star schema, and \texttt{wide\_streams}.}
-    \label{fig:dbt-graph}
-\end{figure}
-
-\subsection{Streaming Job: Kafka to Hudi Bronze}
-
-Listing~\ref{lst:build-stream} shows the core of the Spark Structured Streaming job that reads a Kafka topic, decodes it, and derives the time columns used to partition the bronze Hudi tables.
+Listing~\ref{lst:build-stream} shows the core of the job that reads a Kafka topic, decodes it, and derives the time columns later used to partition the bronze Hudi tables.
 
 \begin{lstlisting}[language=Python, caption={Building a Hudi bronze stream from a Kafka topic (excerpt from \texttt{spark\_streaming/jobs/stream\_events.py}).}, label={lst:build-stream}]
 def build_stream(spark, topic, decode_strings):
@@ -114,6 +87,61 @@ def build_stream(spark, topic, decode_strings):
     )
 \end{lstlisting}
 
-\section{Cluster and Environment Setup}
+Structured Streaming resumes from a persisted checkpoint volume (\texttt{spark-checkpoints}) on restart; each micro-batch also commits its Kafka offsets to a \texttt{streamify-<topic>} consumer group purely so lag is visible in Grafana (Spark itself never depends on that commit to resume).
+
+\textbf{Why Spark Structured Streaming, and not Flink.} An earlier version of this project used Apache Flink for this job. It was replaced with Spark Structured Streaming so that stream processing runs on the same engine and cluster that dbt already needs for batch transformation (avoiding operating two separate distributed runtimes on a 4-core cluster), and to reuse Hudi's first-class Spark data source support. The trade-off accepted is latency: Flink's event-at-a-time model can achieve lower per-event latency than Spark's micro-batch model (Section~\ref{sec:flink-vs-spark}).
+
+\section{Storage Layer}
+
+Tables are Hudi-managed, backed by MinIO/S3 locally or real S3 in \texttt{aws} mode via the Hadoop S3A connector, with no rebuild needed to switch between the two -- only an environment variable (\texttt{LAKE\_ENV}). There is no separate catalog service: each table is self-describing at its storage path (a \texttt{.hoodie/} metadata directory) and is (re-)registered into Spark's catalog idempotently at job startup. Bronze tables use the MERGE\_ON\_READ table type, so fast streaming appends land as delta log files that are periodically compacted into columnar base files; gold and seed tables use COPY\_ON\_WRITE, rebuilt via full overwrite.
+
+\textbf{Why Hudi, and why MOR bronze / COW gold.} Hudi's self-describing \texttt{.hoodie/} metadata avoids the extra catalog or warehouse service that plain Parquet or Snowflake would require. Bronze uses MOR to keep frequent streaming appends cheap; gold uses COW because it is rebuilt once per run and then read repeatedly by Superset (Section~\ref{sec:storage-format}).
+
+\section{Transformation Layer}
+\label{sec:transformation-layer}
+
+dbt~\cite{dbt} connects to the Spark cluster via the Spark Thrift Server (\texttt{method: thrift}) and builds two model layers directly on top of the bronze Hudi tables, materialized as COPY\_ON\_WRITE Hudi tables rebuilt via full overwrite each run:
+
+\begin{itemize}
+    \item \textbf{Star schema.} One fact table, \texttt{fact\_streams}, joined to five dimension tables: \texttt{dim\_users}, \texttt{dim\_songs}, \texttt{dim\_artists}, \texttt{dim\_locations}, and \texttt{dim\_datetime}. This is the normalized, storage-efficient model (Section~\ref{sec:core-theory}).
+    \item \textbf{Wide table (\texttt{wide\_streams}).} A denormalized table built from the star schema by pre-joining \texttt{fact\_streams} with all five dimension tables, so that Superset can query a single flat table instead of performing joins at dashboard-query time.
+\end{itemize}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{star_schema.png}
+    \caption{Star schema: \texttt{fact\_streams} and its five dimension tables.}
+    \label{fig:star-schema}
+\end{figure}
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{dbt_graph.png}
+    \caption{dbt DAG showing the dependency between bronze sources, the star schema, and \texttt{wide\_streams}.}
+    \label{fig:dbt-graph}
+\end{figure}
+
+\textbf{Why dbt, and why both a star schema and a wide table.} dbt was chosen over a layer of hand-written Spark SQL scripts because it declares model dependencies explicitly (via \texttt{ref()}/\texttt{source()}), runs a built-in test framework against every model (uniqueness, not-null, referential integrity), and generates documentation from the same source files -- properties that matter given the five-dimension join the fact table depends on. Modelling both a star schema and a separate wide table, rather than either alone, keeps normalization and storage efficiency in the star schema while keeping BI query simplicity in \texttt{wide\_streams}, instead of trading one off against the other.
+
+\section{Serving Layer}
+\label{sec:serving-layer}
+
+Apache Superset~\cite{superset} connects to the same Spark Thrift Server that dbt submits SQL through, querying the \texttt{wide\_streams} model to visualize insights through interactive dashboards (\texttt{superset/provision\_dashboard.py} provisions them via the REST API). Figure~\ref{fig:results-dashboard} shows the resulting dashboard layout.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.95\textwidth]{dashboard.png}
+    \caption{Superset results dashboard, built on top of \texttt{wide\_streams} and queried through the Spark Thrift Server.}
+    \label{fig:results-dashboard}
+\end{figure}
+
+Prometheus scrapes Kafka consumer-group lag (via kafka-exporter), Spark's built-in Prometheus metrics, and per-container stats (via cAdvisor); Grafana visualizes all of it across dashboards.
+
+\textbf{Why Superset.} Superset ships a native Thrift/HiveServer2-compatible connector that talks directly to the Spark Thrift Server endpoint already used by dbt, needing no extra license or gateway infrastructure, unlike Power BI or Tableau.
+
+\section{Deployment \& Environment}
+\label{sec:proposed-cluster-setup}
 
 The whole stack is deployed with Docker Compose (\texttt{docker-compose.yml}), with a \texttt{docker-compose.dev.yml} overlay that adds MinIO for local, S3-free development. Spark runs as a Standalone cluster of 1 master and 2 workers, 2 cores / 2 GB each (4 cores total), shared between the streaming ingestion job and the Spark Thrift Server that dbt submits SQL through, each capped at 2 cores.
+
+\textbf{Why Spark Standalone at this size.} Spark Standalone was chosen over YARN or Kubernetes because both alternatives add a separate resource-management control plane that is not justified when the entire compute budget is 4 cores across one master and two workers; Standalone instead runs as three containers alongside the rest of the pipeline in the same \texttt{docker-compose.yml}. The direct consequence is that the streaming job and the Thrift Server, each capped at a fixed 2 cores, together already consume the entire cluster, leaving no headroom for ad-hoc Spark SQL while both are running.

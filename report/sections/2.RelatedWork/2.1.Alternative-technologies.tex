@@ -1,24 +1,64 @@
 \section{Alternative Technologies}
 
-Several alternative technologies were considered for each stage of the pipeline before settling on the stack described in Chapter~\ref{ch:proposed-solution}.
+This chapter reviews the established, existing solutions for the four problems this pipeline must solve -- event ingestion, cluster sizing, stream processing, and lakehouse storage -- before comparing how this project's own choices, described in Chapter~\ref{ch:proposed-solution}, relate to that existing field. Each subsection below follows the same pattern: what already exists and is widely used in industry and research, which alternatives were weighed for this project, and why the chosen option fits here.
+
+\subsection{Ingestion: Apache Kafka vs. Plain HTTP/REST vs. RabbitMQ}
+\label{sec:kafka-vs-alt}
+
+Kafka's log-based publish/subscribe model was originally built at LinkedIn to carry high-throughput activity-stream and operational-metrics data between systems, and its design was later published as the now widely-cited Kafka paper~\cite{kafka}. Since then, a durable, replayable log broker of this kind has become the de facto standard message queue at the ingestion boundary of streaming architectures industry-wide, underpinning both the Lambda and Kappa architecture patterns. Against that established backdrop, three ways of getting Eventsim's generated events into this pipeline were considered.
+
+\begin{itemize}
+    \item \textbf{Plain HTTP/REST ingestion.} Eventsim could post each event directly to an HTTP endpoint backed by the storage layer. This needs no separate broker, but it couples producer and consumer directly in time: a burst of events forces the receiving endpoint to keep up synchronously, there is no built-in buffering, and there is no way to replay or reprocess events once they have been received.
+    \item \textbf{RabbitMQ.} A classic message broker with per-message acknowledgment and flexible exchange/queue routing. Its model is built around dispatching a message to a queue and removing it once consumed; replaying history for a new or failed consumer generally requires the message still to be present in a queue, and running two independent consumers over the same events (e.g. the streaming job today, an ad-hoc reprocessing job later) is not the primary use case the queue model was designed for.
+    \item \textbf{Apache Kafka~\cite{kafka}.} A durable, append-only, partitioned log. Consumers track their own read position (offset) per topic and per consumer group, so the same retained log can be replayed and consumed independently by multiple readers without the broker deleting data on consumption.
+\end{itemize}
+
+The trade-off that mattered here was decoupling and replay: the pipeline needs Structured Streaming to resume exactly where it left off after a restart (Section~\ref{sec:core-theory}), and needs the option to reprocess or backfill from the same event history without re-running Eventsim. Kafka's retained, partitioned log with per-consumer-group offsets satisfies both directly, which is why it was chosen over both a direct HTTP push and a traditional message queue.
+
+\subsection{Kafka Cluster Sizing: 2-node KRaft with Replication Factor 2}
+\label{sec:kafka-sizing}
+
+While the previous subsection reviewed Kafka as a technology choice at industry scale, cluster sizing itself is a project-specific configuration decision rather than an industry-wide standard: broker count and replication factor are always set to match a deployment's own fault-tolerance and resource budget. For this project, three cluster sizes were possible: a single broker, a two-broker cluster, or a larger cluster of three or more brokers.
+
+\begin{itemize}
+    \item \textbf{Single broker.} Simplest to run, but every partition has exactly one copy: a broker restart or crash makes its partitions unavailable until it comes back, with zero fault tolerance.
+    \item \textbf{Larger cluster (3+ brokers, replication factor 3).} Higher fault tolerance, but needs a third (or more) broker container running on the same machine that already hosts the Spark cluster, Hudi/MinIO, dbt's Thrift Server, Superset, and the monitoring stack.
+    \item \textbf{Two brokers, replication factor 2.} Every partition has a replica on both brokers, so the cluster keeps serving all partitions if either single broker restarts or fails, using only two broker containers.
+\end{itemize}
+
+Given the whole stack runs via Docker Compose on a single, resource-constrained machine where the Spark cluster alone already claims 4 cores (Section~\ref{sec:proposed-cluster-setup}), replication factor 2 on two brokers was the smallest configuration providing any broker-level fault tolerance without paying for a third broker container -- this is why the project settled on a 2-node KRaft cluster with replication factor 2 rather than a single broker or a larger cluster.
 
 \subsection{Stream Processing: Apache Flink vs. Apache Spark Structured Streaming}
+\label{sec:flink-vs-spark}
 
-Apache Flink~\cite{flink} is a distributed stream-processing engine built around native, event-at-a-time streaming with low end-to-end latency. An earlier version of this project used a Flink SQL job for the Kafka-to-lakehouse ingestion path. Apache Spark Structured Streaming~\cite{spark-structured-streaming}, in contrast, models streaming as a sequence of small batch jobs (micro-batching) on top of the same engine used for batch and SQL workloads.
+Apache Flink and Apache Spark Structured Streaming are the two dominant distributed stream-processing engines used in industry and research today, and this project's own pipeline evaluated both directly. Apache Flink~\cite{flink} is built around native, event-at-a-time streaming with low end-to-end latency, and is the engine of choice for organizations whose workloads demand very low end-to-end latency; an earlier version of this project used a Flink SQL job for the Kafka-to-lakehouse ingestion path. Apache Spark Structured Streaming~\cite{spark-structured-streaming}, in contrast, models streaming as a sequence of small batch jobs (micro-batching) on top of the same engine used for batch and SQL workloads, and is widely adopted where a single engine needs to serve both batch and streaming workloads.
 
 The project replaced the Flink job with a Spark Structured Streaming job (Section~\ref{sec:core-theory}) for two practical reasons:
 
 \begin{itemize}
-    \item \textbf{Unified engine.} dbt already needed a Spark cluster (via the Spark Thrift Server) for the batch transformation layer. Running the streaming ingestion job on the same Spark Standalone cluster avoids operating two separate distributed engines (Flink and Spark) on a cluster with only 4 cores in total.
-    \item \textbf{Native Hudi integration.} Apache Hudi ships first-class Spark data source support, which simplifies writing MERGE\_ON\_READ bronze tables directly from the streaming job.
+    \item \textbf{Operational simplicity and unified engine.} Running Flink alongside Spark means operating two separate distributed runtimes -- each with its own cluster manager, checkpointing/savepoint mechanism, and deployment model -- on a cluster with only 4 cores in total (Section~\ref{sec:proposed-cluster-setup}). dbt already needed a Spark cluster (via the Spark Thrift Server) for the batch transformation layer, and the team's existing familiarity was with Spark's DataFrame/SQL API from that batch layer. Consolidating stream and batch processing onto one engine and one operational model reduces the surface area a small team has to maintain, at the cost of giving up Flink's lower-latency, event-at-a-time execution.
+    \item \textbf{Native Hudi integration.} Apache Hudi ships first-class Spark data source support, which simplifies writing MERGE\_ON\_READ bronze tables directly from the streaming job without an extra connector layer.
 \end{itemize}
 
-The trade-off is latency: Flink's native streaming model can achieve lower per-event latency than Spark's micro-batch model. For this project's throughput and cluster size, the micro-batch trade-off was considered acceptable.
+The trade-off is latency: Flink's native streaming model can achieve lower per-event latency than Spark's micro-batch model, since Spark's output only becomes visible once a whole micro-batch trigger interval has elapsed. For this project's throughput and cluster size, operational simplicity and team familiarity with a single, already-shared engine outweighed the latency advantage that a separate, lower-latency Flink cluster would have provided.
 
-\subsection{Storage \& Warehousing: Data Lakehouse (Hudi) vs. Cloud Data Warehouse (Snowflake)}
+\subsection{Storage \& Table Format: Apache Hudi vs. Plain Parquet, Delta Lake/Iceberg, and Snowflake}
+\label{sec:storage-format}
 
-Cloud data warehouses such as Snowflake~\cite{snowflake} offer a fully managed SQL warehouse with separate storage and compute, but couple the project to a proprietary, hosted platform and its billing model. This project instead adopted the lakehouse pattern: raw and modelled data are stored as Apache Hudi tables on object storage (MinIO locally, Amazon S3 in \texttt{aws} mode), and Spark/dbt query that storage directly. This keeps the storage layer open-format and self-describing (each Hudi table carries its own \texttt{.hoodie/} metadata directory, so no separate catalog service is required) and keeps the whole stack deployable with Docker Compose on a single machine or a small cluster, which suited the project's development and demonstration constraints better than a managed cloud warehouse.
+Getting ACID transactions and row-level upsert/delete semantics on top of plain files in a data lake is a problem the broader industry has already converged on a category of solution for: the open table format, with Apache Hudi, Delta Lake, and Apache Iceberg established as the three dominant open table formats in current use, alongside proprietary managed warehouses such as Snowflake that solve the same problem by fully owning storage and compute. Four options along this spectrum were considered for how the lakehouse layer stores and manages tables.
 
-\subsection{Processing Paradigm: Streaming vs. Plain Batch ETL}
+\begin{itemize}
+    \item \textbf{Plain Parquet files, no table format layer.} Cheapest to write, but plain Parquet has no row-level upsert/delete semantics, no ACID commits, and no time travel; a separate catalog service (such as a Hive Metastore or a cloud catalog) would still be needed to track partitions and schema, adding another piece of infrastructure to operate.
+    \item \textbf{Delta Lake / Apache Iceberg.} Both are comparable open table formats that add ACID transactions and schema evolution on top of object storage, similar in spirit to Hudi.
+    \item \textbf{Snowflake~\cite{snowflake}, a cloud data warehouse.} Fully managed, with storage and compute separated, but it couples the project to a proprietary, hosted platform and its billing model.
+    \item \textbf{Apache Hudi~\cite{hudi} (chosen).} A transactional table format for data lakes with row-level insert/update/delete semantics, ACID commits, and time travel over plain files on object storage.
+\end{itemize}
 
-A simpler alternative would have been a plain batch ETL job: periodically read newly arrived Eventsim output files and load them into the warehouse. This project instead used an always-on streaming pipeline (Kafka plus Spark Structured Streaming) so that events are captured and land in the bronze layer continuously, closer to real time, and so that the project could demonstrate streaming-specific concerns -- partitioning, replication, checkpointed exactly-once processing, and consumer lag monitoring -- that a batch-only design would not exercise.
+Two concrete reasons drove the choice of Hudi specifically:
+
+\begin{itemize}
+    \item \textbf{No separate catalog service.} Each Hudi table is self-describing: it carries its own \texttt{.hoodie/} metadata directory at its storage path, and Spark (re-)registers the table into its own catalog idempotently at job/run startup. This avoids standing up and operating a separate catalog service (as plain Parquet would require) purely to track table metadata, which matters for a project meant to be deployable end-to-end with a single Docker Compose command.
+    \item \textbf{Explicit MERGE\_ON\_READ / COPY\_ON\_WRITE split matching the pipeline's two write patterns.} Hudi's distinction between MOR and COW table types (Section~\ref{sec:core-theory}) maps directly onto the pipeline's two different write patterns: frequent, small streaming appends into the bronze layer, and full-overwrite batch rebuilds into the gold layer. Bronze tables use MOR because the streaming job appends small batches of new events continuously; under COW, every micro-batch write would rewrite entire Parquet files, multiplying write amplification with append frequency. MOR instead appends cheaply to a compact row-based delta log, deferring the cost of producing a fully merged, columnar view to a background compaction job. Gold tables use COW instead, because dbt rebuilds them via full overwrite once per run and Superset then reads them repeatedly for dashboards: COW pays the rewrite cost once per run, after which every dashboard query is a plain Parquet scan with no read-time merge step, whereas MOR would push that merge cost onto every single read.
+\end{itemize}
+
+Compared to Snowflake, adopting the lakehouse pattern (raw and modelled data as Hudi tables on MinIO locally, or Amazon S3 in \texttt{aws} mode via the Hadoop S3A connector, with Spark/dbt querying that storage directly) keeps the storage layer open-format and keeps the whole stack deployable on a single machine or small cluster with Docker Compose, which suited this project's development and demonstration constraints better than committing to a managed cloud warehouse. Compared to Delta Lake or Iceberg, Hudi's explicit MOR/COW split was the deciding factor, since it lets the bronze and gold layers each use the write/read profile that matches their actual access pattern instead of a single table type across both.

@@ -1,3 +1,11 @@
 \section{Goals}
 
-% \Khang{Kết hợp với RAG là phụ, cốt lõi là invent ra được improvement của multimodal retrieval}
+The goals of this project are:
+
+\begin{itemize}
+    \item \textbf{Build a working, end-to-end streaming lakehouse pipeline.} Take synthetic music-streaming events from generation (Eventsim) through ingestion (Kafka), stream processing (Spark Structured Streaming), lakehouse storage (Hudi), transformation (dbt), and visualization (Superset), as a single reproducible system rather than isolated proofs of concept.
+    \item \textbf{Demonstrate streaming-specific concerns, not just data movement.} Exercise partitioning, replication, checkpointed exactly-once processing, and consumer-lag monitoring, so the pipeline shows the behaviors that distinguish a streaming design from a periodic batch job (Section~\ref{sec:core-theory}).
+    \item \textbf{Justify every major technology choice against concrete alternatives.} For each stage of the pipeline, identify the alternatives that were available, the trade-off that mattered for this project, and why the chosen option won (Chapter~\ref{ch:related-work}), instead of treating the stack as a given.
+    \item \textbf{Operate within a small, fixed-size compute budget.} Design the Kafka and Spark cluster sizing, and the choice of table format and transformation tooling, around a resource-constrained, single-machine deployment rather than assuming elastic cloud scale.
+    \item \textbf{Make the whole system observable and reproducible.} Provide Prometheus/Grafana monitoring of Kafka lag and Spark resource usage, and deploy the entire stack with a single Docker Compose command.
+\end{itemize}

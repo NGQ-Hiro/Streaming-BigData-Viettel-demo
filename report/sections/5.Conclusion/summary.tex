@@ -2,6 +2,37 @@
 
 This project delivered a working, end-to-end streaming lakehouse pipeline: Eventsim-generated events flow through a 2-node Kafka cluster into a Spark Structured Streaming job that lands MERGE\_ON\_READ Hudi bronze tables, which dbt transforms (via the Spark Thrift Server) into a COPY\_ON\_WRITE star schema (\texttt{fact\_streams} and five dimension tables) plus a denormalized \texttt{wide\_streams} table. Apache Superset dashboards query that wide table through the same Thrift Server, and a Prometheus/Grafana/cAdvisor stack monitors Kafka consumer lag and Spark resource usage throughout. The entire stack is reproducible with a single Docker Compose command.
 
+\section{Summary of Design Decisions}
+
+Table~\ref{tab:design-decisions} summarizes the major technology choices made throughout this project, the alternatives considered for each, and the trade-off that decided the outcome. The ingestion, stream-processing, and storage/table-format choices are discussed in full in Chapter~\ref{ch:related-work}; the remaining choices are discussed alongside the layer they belong to in Chapter~\ref{ch:proposed-solution}.
+
+\begin{table}[H]
+    \centering
+    \caption{Summary of major design decisions and their deciding trade-offs.}
+    \label{tab:design-decisions}
+    \begin{tabularx}{\textwidth}{|l|l|X|}
+        \hline
+        \textbf{Decision} & \textbf{Alternatives considered} & \textbf{Deciding trade-off} \\
+        \hline
+        Kafka for ingestion & HTTP/REST push, RabbitMQ & Durable, replayable log with per-consumer-group offsets vs.\ no built-in replay (Section~\ref{sec:kafka-vs-alt}) \\
+        \hline
+        2-node KRaft, RF2 & Single broker, larger cluster & Smallest sizing giving any broker fault tolerance, within a single-machine budget (Section~\ref{sec:kafka-sizing}) \\
+        \hline
+        Spark Structured Streaming & Apache Flink & Shared engine/cluster with dbt batch jobs vs.\ Flink's lower per-event latency (Section~\ref{sec:flink-vs-spark}) \\
+        \hline
+        Hudi (MOR bronze / COW gold) & Plain Parquet, Delta Lake/Iceberg, Snowflake & Self-describing tables, no extra catalog/warehouse service; MOR write cost vs.\ COW read cost (Section~\ref{sec:storage-format}) \\
+        \hline
+        dbt for transformation & Hand-written Spark SQL scripts & Declared dependencies, built-in tests, and generated docs vs.\ manual scripting (Section~\ref{sec:transformation-layer}) \\
+        \hline
+        Star schema + wide table & Star schema alone, wide table alone & Normalization/storage efficiency vs.\ BI query simplicity, kept together instead of traded off (Section~\ref{sec:transformation-layer}) \\
+        \hline
+        Superset for dashboards & Power BI, Tableau & Native Thrift/HiveServer2 connector, no extra license or gateway infrastructure (Section~\ref{sec:serving-layer}) \\
+        \hline
+        Spark Standalone, 4 cores & YARN, Kubernetes & No separate resource-management control plane needed at this compute budget (Section~\ref{sec:proposed-cluster-setup}) \\
+        \hline
+    \end{tabularx}
+\end{table}
+
 \section{Limitations}
 
 \begin{itemize}

@@ -33,7 +33,7 @@ The Grafana dashboards backed by Prometheus provide qualitative evidence of the 
 
 \section{Scalability}
 
-Table~\ref{tab:scalability} is a placeholder for measured scalability results (dataset size vs. cluster size vs. runtime). No such measurements exist in this repository at the time of writing (\texttt{results/} is not present), so no numbers are reported here to avoid fabricating results.
+Table~\ref{tab:scalability} is a placeholder for measured scalability results (event volume vs. Kafka/Spark cluster sizing vs. runtime). No such measurements exist in this repository at the time of writing (\texttt{results/} is not present), so no numbers are reported here to avoid fabricating results.
 
 \begin{table}[H]
     \centering
@@ -41,7 +41,7 @@ Table~\ref{tab:scalability} is a placeholder for measured scalability results (d
     \label{tab:scalability}
     \begin{tabular}{|l|l|l|l|}
         \hline
-        \textbf{Dataset} & \textbf{Nodes} & \textbf{Edges} & \textbf{Runtime} \\
+        \textbf{Event volume} & \textbf{Kafka brokers} & \textbf{Spark cores} & \textbf{Runtime} \\
         \hline
         % TODO: insert measured results
          &  &  & \\
