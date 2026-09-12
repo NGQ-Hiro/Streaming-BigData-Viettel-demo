@@ -176,6 +176,8 @@ services:
         condition: service_started
       eventsim:
         condition: service_started
+      hive-metastore-db:
+        condition: service_started
     restart: unless-stopped
     # cores.max=2 caps this job to half the cluster (2 workers x 2 cores = 4
     # total) so spark-thrift isn't left waiting on slots. No headroom left
@@ -187,6 +189,31 @@ services:
       - --conf
       - spark.cores.max=2
       - /opt/spark/jobs/stream_events.py
+
+  # Shared Hive metastore DB for spark-streaming + spark-thrift (see
+  # spark-conf/hive-site.xml) -- so tables spark-streaming creates are
+  # visible to spark-thrift/dbt/Superset without the two apps needing a
+  # common in-process catalog. Schema is loaded from the official Hive 2.3.0
+  # postgres schema script (matches the hive-metastore-2.3.9 jars this repo's
+  # Spark image bundles) via postgres's own docker-entrypoint-initdb.d, run
+  # once on an empty volume. NOT relying on DataNucleus's own
+  # autoCreateSchema/autoCreateAll for this: under concurrent connections it
+  # deadlocks itself creating FK constraints (two DataNucleus-opened JDBC
+  # connections racing DDL on the same table) -- pre-loading the schema up
+  # front means Spark's Hive client finds everything already there and never
+  # takes that code path.
+  hive-metastore-db:
+    image: postgres:16-alpine
+    container_name: hive-metastore-db
+    environment:
+      POSTGRES_DB: metastore
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: hive
+    volumes:
+      - ./spark-conf/hive-metastore-init:/docker-entrypoint-initdb.d:ro
+      - hive-metastore-data:/var/lib/postgresql/data
+    networks:
+      - my-network
 
   # Long-running Spark Thrift Server: lets dbt (method: thrift) submit SQL
   # onto the real spark-master cluster instead of a local in-process
@@ -205,6 +232,8 @@ services:
       spark-master:
         condition: service_started
       spark-worker:
+        condition: service_started
+      hive-metastore-db:
         condition: service_started
     restart: unless-stopped
     ports:
@@ -356,3 +385,4 @@ volumes:
   prometheus-data:
   grafana-data:
   spark-checkpoints:
+  hive-metastore-data:

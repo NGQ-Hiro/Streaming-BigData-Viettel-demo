@@ -48,15 +48,24 @@ RUN wget -q -P $SPARK_HOME/jars \
     https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar \
     https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar
 
+# JDBC driver for the shared Hive metastore (hive-site.xml below) --
+# DataNucleus needs this on the classpath to talk to hive-metastore-db.
+RUN wget -q -P $SPARK_HOME/jars \
+    https://repo1.maven.org/maven2/org/postgresql/postgresql/42.7.4/postgresql-42.7.4.jar
+
 # entrypoint.sh renders $SPARK_CONF_DIR/spark-defaults.conf at container
 # start from the template matching $LAKE_ENV (rest for dev, glue for aws) —
-# one image, no rebuild needed to switch environments. $SPARK_HOME/conf
-# already exists and is owned by the spark user from the base image.
+# one image, no rebuild needed to switch environments.
+# hive-site.xml is static (not per-LAKE_ENV) -- same shared metastore either way.
+# COPY-ing hive-site.xml into this dir as root re-owns it, so entrypoint.sh
+# (running as spark) can no longer write spark-defaults.conf there without
+# the explicit chown below.
 ENV SPARK_CONF_DIR=$SPARK_HOME/conf
 
 COPY spark-conf/ /opt/spark-conf-templates/
+COPY spark-conf/hive-site.xml $SPARK_CONF_DIR/hive-site.xml
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN chmod +x /entrypoint.sh && chown -R spark:spark $SPARK_CONF_DIR
 
 # Pre-create as spark:spark so a fresh named volume mounted here (compose's
 # spark-checkpoints) inherits this ownership instead of defaulting to root

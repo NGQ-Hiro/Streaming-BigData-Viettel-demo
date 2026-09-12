@@ -22,14 +22,13 @@ clean-targets:         # directories to be removed by `dbt clean`
   - "target"
   - "dbt_packages"
 
-# Creates the databases the models below live in, then registers the bronze
-# Hudi tables that spark-streaming writes. spark-streaming and spark-thrift
-# are separate Spark applications with separate, unshared catalogs (no Hive
-# metastore service configured) -- spark-streaming's own
+# Creates the databases the models below live in. spark-streaming and
+# spark-thrift now share a Hive metastore (postgres, see
+# spark-conf/hive-site.xml), so spark-streaming's own
 # `CREATE TABLE IF NOT EXISTS staging.<topic> USING hudi LOCATION ...` call
-# (stream_events.py) only registers each topic in ITS OWN session, so dbt/
-# Superset (talking to spark-thrift) can't see staging.auth_events etc.
-# without registering them here too. Same reasoning for the songs seed
+# (stream_events.py) is already visible here -- these CREATE DATABASE calls
+# just make sure the databases exist before dbt's own models run against them
+# on a fresh metastore. Same reasoning for the songs seed
 # (10k rows -- too many for a plain `dbt seed`, whose inline-VALUES compile
 # is near-quadratic in Catalyst; reading the CSV as a file source instead
 # stays fast at any row count). IF NOT EXISTS makes all of this a no-op after

@@ -1,0 +1,54 @@
+<?xml version="1.0"?>
+<!-- Shared Hive metastore for spark-streaming + spark-thrift, backed by the
+     hive-metastore-db postgres service (docker-compose.yml). Postgres (not
+     Derby) because Derby's embedded driver only allows one JVM at a time;
+     streaming and thrift are separate Spark apps that both need to see the
+     same tables.
+
+     Schema is pre-loaded once via postgres's own docker-entrypoint-initdb.d
+     (spark-conf/hive-metastore-init/, the official Hive 2.3.0 postgres
+     schema script; matches the hive-metastore-2.3.9 jars bundled in this
+     repo's Spark image), NOT via DataNucleus's autoCreateSchema/
+     autoCreateAll. Tried autoCreateAll first: under concurrent JDBC
+     connections it deadlocked itself doing its one-time DDL (two
+     DataNucleus-opened connections racing ALTER TABLE ADD CONSTRAINT /
+     INSERT on the same metastore tables) even with connection pooling
+     disabled; pre-loading the schema means Spark's Hive client always
+     finds everything already there and never takes that code path.
+
+     Static (not env-templated like spark-defaults.conf) since the same
+     postgres service is used regardless of LAKE_ENV. -->
+<configuration>
+  <property>
+    <name>javax.jdo.option.ConnectionURL</name>
+    <value>jdbc:postgresql://hive-metastore-db:5432/metastore</value>
+  </property>
+  <property>
+    <name>javax.jdo.option.ConnectionDriverName</name>
+    <value>org.postgresql.Driver</value>
+  </property>
+  <property>
+    <name>javax.jdo.option.ConnectionUserName</name>
+    <value>hive</value>
+  </property>
+  <property>
+    <name>javax.jdo.option.ConnectionPassword</name>
+    <value>hive</value>
+  </property>
+  <property>
+    <name>datanucleus.autoCreateSchema</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>datanucleus.schema.autoCreateAll</name>
+    <value>false</value>
+  </property>
+  <property>
+    <name>datanucleus.fixedDatastore</name>
+    <value>true</value>
+  </property>
+  <property>
+    <name>hive.metastore.schema.verification</name>
+    <value>false</value>
+  </property>
+</configuration>

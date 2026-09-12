@@ -139,10 +139,28 @@ def _write_batch(topic, batch_df, batch_id):
 
 
 def main():
-    spark = SparkSession.builder.appName("bronze-stream").getOrCreate()
+    # enableHiveSupport: without it, the CREATE TABLE below (staging.<topic>)
+    # lands in a private in-memory catalog only this JVM can see -- spark-thrift
+    # (hive-site.xml, same shared postgres metastore) wouldn't find the table.
+    spark = SparkSession.builder.appName("bronze-stream").enableHiveSupport().getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
 
     spark.sql("CREATE DATABASE IF NOT EXISTS staging")
+
+    # Warm-up: on a fresh metastore, DataNucleus lazily creates several
+    # metastore tables (TBLS, TBL_PRIVS, its FK constraints, ...) on the
+    # FIRST CREATE TABLE it ever sees -- CREATE DATABASE above doesn't touch
+    # that code path. The 3 streaming queries below each fire their own
+    # CREATE TABLE concurrently (one per stream-execution thread) once
+    # batches start landing, and racing that lazy DDL from multiple threads
+    # deadlocked in postgres (concurrent ALTER TABLE ADD CONSTRAINT). Doing
+    # one harmless CREATE+DROP here, single-threaded, forces that one-time
+    # DDL to happen before any concurrent writer exists.
+    spark.sql(
+        f"CREATE TABLE IF NOT EXISTS staging.__metastore_init (id INT) "
+        f"USING parquet LOCATION '{_WAREHOUSE}/staging/__metastore_init'"
+    )
+    spark.sql("DROP TABLE IF EXISTS staging.__metastore_init")
 
     for topic, decode_strings in TOPICS:
         df = build_stream(spark, topic, decode_strings)
