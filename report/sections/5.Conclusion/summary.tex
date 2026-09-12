@@ -8,9 +8,7 @@ Table~\ref{tab:design-decisions} summarizes the major technology choices made th
 
 \begin{table}[H]
     \centering
-    \caption{Summary of major design decisions and their deciding trade-offs.}
-    \label{tab:design-decisions}
-    \begin{tabularx}{\textwidth}{|l|l|X|}
+    \begin{tabulary}{\textwidth}{|l|l|L|}
         \hline
         \textbf{Decision} & \textbf{Alternatives considered} & \textbf{Deciding trade-off} \\
         \hline
@@ -30,7 +28,9 @@ Table~\ref{tab:design-decisions} summarizes the major technology choices made th
         \hline
         Spark Standalone, 4 cores & YARN, Kubernetes & No separate resource-management control plane needed at this compute budget (Section~\ref{sec:proposed-cluster-setup}) \\
         \hline
-    \end{tabularx}
+    \end{tabulary}
+    \caption{Summary of major design decisions and their deciding trade-offs.}
+    \label{tab:design-decisions}
 \end{table}
 
 \section{Limitations}
