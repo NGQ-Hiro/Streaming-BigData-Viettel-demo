@@ -32,7 +32,7 @@
 \usepackage{amsmath}
 \usepackage{tabularx}
 
-\graphicspath{{images/}{../image/}{../report/images/}{../report/images/2/}{../report/images/4/}}
+\graphicspath{{images/}{../image/}{../image/2/}{../image/4/}}
 
 \renewcommand{\footnotesize}{\tiny}
 
@@ -93,23 +93,66 @@
 \end{frame}
 
 %=============================================================================
-\section{Problem \& Challenges}
+\section{Problem \& Solution}
 %=============================================================================
 
-\begin{frame}{The Problem Before Streaming Lakehouses}
-  \begin{itemize}\setlength\itemsep{2pt}\small
-    \item \textbf{Batch ETL latency} -- dashboards always reflect the last scheduled load, not the current state
-    \item \textbf{Lambda-architecture complexity} -- a batch layer and a separate real-time speed layer duplicate the same logic in two codebases
-    \item \textbf{No serving layer on the lake} -- plain object storage has no row-level update/delete or ACID transactions; the lake stayed a read-only dump
-    \item \textbf{Storage and compute coupled} -- traditional warehouses force paying for both together, so teams kept two copies of the same data
-  \end{itemize}
-  \vspace{0.2cm}
-  \textbf{This project's concrete challenges:}
+\begin{frame}{The Problem (1/2): Latency and Duplicated Logic}
+\begin{columns}[T]
+  \column{0.48\textwidth}
+  \centering
+  \includegraphics[width=0.85\textwidth]{ELT-latency.png}\\[2pt]
+  {\small \textbf{Batch ETL latency}}
   \begin{itemize}\small
-    \item \textbf{Streaming volume \& velocity} -- keeping up with Eventsim's continuous arrival rate across \texttt{listen\_events}, \texttt{page\_view\_events}, \texttt{auth\_events}
-    \item \textbf{Exactly-once, fault-tolerant processing} on a 2-node KRaft cluster (replication factor 2, 3 partitions/topic), no ZooKeeper
-    \item \textbf{Compute and partitioning} on a 4-core Spark Standalone cluster (1 master + 2 workers, 2 cores/2\,GB each), shared 2 cores each between the streaming job and the dbt Thrift Server
+    \item Data is loaded on a schedule
+    \item Dashboards show the last load, not now
   \end{itemize}
+  \column{0.48\textwidth}
+  \centering
+  \includegraphics[width=0.85\textwidth]{lambda.png}\\[2pt]
+  {\small \textbf{Lambda architecture}}
+  \begin{itemize}\small
+    \item Batch layer + speed layer
+    \item Same logic written twice, two codebases that can drift apart
+  \end{itemize}
+\end{columns}
+\end{frame}
+
+\begin{frame}{The Problem (2/2): The Lake Cannot Serve, Storage Is Coupled}
+\begin{columns}[T]
+  \column{0.48\textwidth}
+  \centering
+  \includegraphics[width=0.85\textwidth]{data_swamp.png}\\[2pt]
+  {\small \textbf{No serving layer on the lake}}
+  \begin{itemize}\small
+    \item Raw files: no row-level update, no ACID
+    \item The lake becomes a data swamp
+  \end{itemize}
+  \column{0.48\textwidth}
+  \centering
+  \includegraphics[width=0.85\textwidth]{decouple_storage_compute.png}\\[2pt]
+  {\small \textbf{Storage and compute coupled}}
+  \begin{itemize}\small
+    \item Warehouse: scale one, pay for both
+    \item Two copies of data (lake + warehouse)
+  \end{itemize}
+\end{columns}
+\end{frame}
+
+\begin{frame}{How We Solve It}
+\centering
+\small
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{0.27\textwidth} >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}p{0.2\textwidth}}
+\toprule
+\textbf{Problem} & \textbf{Our solution} & \textbf{Tool} \\
+\midrule
+Batch ETL latency & Continuous streaming into the lake, no wait for a schedule & Kafka + Spark Streaming \\
+Lambda duplication & One streaming path; dbt reads the same tables, no second speed layer & Spark + dbt \\
+No serving layer & Open table format: ACID, upsert, time travel on object storage & Hudi on MinIO \\
+Coupled storage and compute & Storage (MinIO) and compute (Spark) are separate & MinIO + Spark \\
+Manual, fragile runs & Scheduled DAGs for dbt, compaction, dashboard refresh & Airflow \\
+\bottomrule
+\end{tabularx}
 \end{frame}
 
 %=============================================================================
@@ -165,7 +208,23 @@
 \begin{itemize}\small
   \item \textbf{Silver} -- 5 dimension tables from bronze: \texttt{dim\_users}, \texttt{dim\_songs}, \texttt{dim\_artists}, \texttt{dim\_locations}, \texttt{dim\_datetime}
   \item \textbf{Gold} -- \texttt{fact\_streams} (bronze + 5 dims, star schema) and \texttt{wide\_streams} (\texttt{fact\_streams} pre-joined with all 5 dims, so Superset needs no dashboard-time joins)
-  \item dbt is a SQL layer over the same Spark cluster: it generates Spark SQL and submits it via the Spark Thrift Server, materializing every model as COPY\_ON\_WRITE Hudi, rebuilt via full overwrite each run
+  \item dbt is a SQL layer over the same Spark cluster: it generates Spark SQL and submits it via the Spark Thrift Server, materializing every model as COPY\_ON\_WRITE Hudi; fact and big dims update by incremental merge, small dims by overwrite
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Orchestration Layer: Apache Airflow}
+\begin{columns}[T]
+  \column{0.49\textwidth}
+  \centering
+  \includegraphics[width=\textwidth]{airflow_pipeline.png}
+  \column{0.49\textwidth}
+  \centering
+  \includegraphics[width=\textwidth]{airflow_compact.png}
+\end{columns}
+\begin{itemize}\small
+  \item \texttt{full\_pipeline} (every 30 min): seed, dbt build, then Superset refresh
+  \item \texttt{spark\_compact} (every 6 h): Hudi compaction; \texttt{dbt\_adhoc}: run dbt from a form
+  \item One pool slot (\texttt{thrift\_pool}) so jobs use the Thrift Server one at a time on the 4-core cluster
 \end{itemize}
 \end{frame}
 
