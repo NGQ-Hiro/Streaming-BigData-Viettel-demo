@@ -1,6 +1,21 @@
-SELECT 
-    {{ dbt_utils.generate_surrogate_key(['userId', 'rowActivationDate', 'level']) }} as userKey, 
-    *
+{{ config(
+    incremental_strategy='merge',
+    unique_key='userKey',
+    options={'type': 'cow', 'primaryKey': 'userKey', 'preCombineField': 'processed_time'}
+) }}
+
+WITH user_pt AS (
+    -- Last event time per user; a user is "affected" when it is newer than the table's max.
+    SELECT CAST(userId AS BIGINT) AS uid, max(processed_time) AS processed_time
+    FROM {{ source('staging', 'listen_events') }}
+    GROUP BY CAST(userId AS BIGINT)
+)
+
+SELECT
+ 
+    {{ dbt_utils.generate_surrogate_key(['userId', 'rowActivationDate', 'level']) }} as userKey,
+    d.*,
+    user_pt.processed_time AS processed_time
 FROM
 (
     SELECT 
@@ -36,15 +51,17 @@ FROM
                         ,registration
                         ,level
                         ,ts AS date
-                        ,processed_time
                     FROM {{ source('staging', 'listen_events') }}
                     {% if is_incremental() %}
-                        where processed_time > (select max(processed_time) from {{ this }})
+                        -- SCD2 needs a user's whole history: rebuild only users with new events, all their rows.
+                        where cast(userId as bigint) in (
+                            select uid from user_pt where processed_time > (select max(processed_time) from {{ this }})
+                        )
                     {% endif%}
                 )
             )
         )
         GROUP BY userId, firstName, lastName, gender, registration, level, grouped
     )
-)
-
+) d
+JOIN user_pt ON d.userId = user_pt.uid

@@ -1,30 +1,34 @@
-from airflow.decorators import dag, task
-from airflow.providers.docker.operators.docker import DockerOperator
-from docker.types import Mount
+from airflow.decorators import dag
+from airflow.providers.standard.operators.bash import BashOperator
+from airflow.sdk import Param
 
 
-# Manual-trigger dbt run, separate from the daily dbt() DAG.
-# dbt-dbt:latest -- pre-built via `docker compose -f dbt/docker-compose.yml build`
+# Manual-trigger dbt run, separate from full_pipeline. You fill the form when
+# you press "Trigger": which dbt command, which models, full refresh or not.
+# dbt runs inside the airflow container (own venv, see airflow/Dockerfile) and
+# connects to spark-thrift; ./dbt is mounted at /opt/airflow/dbt.
 @dag(
     schedule=None,
     start_date=None,
-    catchup=False
+    catchup=False,
+    params={
+        'command': Param('run', enum=['run', 'build', 'seed', 'test', 'snapshot'],
+                         description='dbt command'),
+        'select': Param('', type='string',
+                        description='--select value, e.g. dim_users+ or fact_streams wide_streams. Empty = all.'),
+        'full_refresh': Param(False, type='boolean', description='Add --full-refresh'),
+        'extra_args': Param('', type='string', description='Any other dbt flags, e.g. --vars "{a: 1}"'),
+    },
 )
 def dbt_adhoc():
-    run_dbt_adhoc = DockerOperator(
+    # shortcut: params go into the shell unquoted (trusted internal users only), quote them if exposed more widely.
+    BashOperator(
         task_id='dbt_adhoc',
-        image='dbt-dbt:latest',
-        command=['bash', '-c', 'dbt deps && dbt run --no-populate-cache'],
-        working_dir='/usr/app',
-        mounts=[
-            Mount(source='/home/newuser/Project/streamify/dbt/my_project',
-                  target='/usr/app', type='bind'),
-            Mount(source='/home/newuser/Project/streamify/dbt',
-                  target='/root/.dbt', type='bind'),
-        ],
-        network_mode='lakehouse-network',
-        docker_url='unix://var/run/docker.sock',
-        auto_remove='success'
+        pool='thrift_pool',
+        bash_command='cd /opt/airflow/dbt/my_project && '
+                     '/home/airflow/dbt-venv/bin/dbt {{ params.command }} '
+                     '{% if params.select %}--select {{ params.select }} {% endif %}'
+                     '{% if params.full_refresh %}--full-refresh {% endif %}'
+                     '{{ params.extra_args }} --no-populate-cache',
     )
-    run_dbt_adhoc
 dbt_adhoc()

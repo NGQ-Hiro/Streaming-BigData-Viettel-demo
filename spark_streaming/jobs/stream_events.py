@@ -52,6 +52,8 @@ def build_stream(spark, topic, decode_strings):
         .option("kafka.bootstrap.servers", KAFKA_BROKERS)
         .option("subscribe", topic)
         .option("startingOffsets", "earliest")
+        # shortcut: local demo -- a wiped Kafka must not crash-loop the job on stale checkpoint offsets; use true in prod.
+        .option("failOnDataLoss", "false")
         .load()
     )
 

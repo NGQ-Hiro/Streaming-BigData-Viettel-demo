@@ -1,5 +1,13 @@
+{{ config(
+    incremental_strategy='merge',
+    unique_key='event_key',
+    options={'type': 'cow', 'primaryKey': 'event_key', 'preCombineField': 'processed_time'}
+) }}
 
-SELECT
+
+SELECT /*+ BROADCAST(dim_songs), BROADCAST(dim_locations), BROADCAST(dim_datetime), BROADCAST(dim_artists) */
+    fact_streams.event_key AS event_key,
+    fact_streams.processed_time AS processed_time,
     fact_streams.userKey AS userKey,
     fact_streams.artistKey AS artistKey,
     fact_streams.songKey AS songKey ,
@@ -44,3 +52,6 @@ JOIN
     {{ ref('dim_datetime') }} ON fact_streams.dateKey = dim_datetime.dateKey
 JOIN
     {{ ref('dim_artists') }} ON fact_streams.artistKey = dim_artists.artistKey
+{% if is_incremental() %}
+WHERE fact_streams.processed_time > (SELECT max(processed_time) FROM {{ this }})
+{% endif %}

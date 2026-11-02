@@ -33,29 +33,15 @@ x-kafka-env: &kafka-env
   # Fixed cluster id so every node formats the same KRaft metadata log
   CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
 
-# x-airflow-common: &airflow-common
-#   image: apache/airflow:3.0.3
-#   volumes:
-#     # - ./airflow/dags:/opt/airflow/dags
-#     # - ./airflow/logs:/opt/airflow/logs
-#     # - ./airflow/jobs:/opt/airflow/jobs
-#     # must create file and gain permission for docker
-#     # - ./airflow/simple_auth_manager_passwords.json.generated:/opt/airflow/simple_auth_manager_passwords.json.generated
-#     - ./airflow:/opt/airflow
-#     - /var/run/docker.sock:/var/run/docker.sock
-
-#   env_file:
-#     - airflow.env
-#   depends_on:
-#     - postgres
-#   networks:
-#     - my-network
-
 services:
   broker-1:
     <<: *kafka-common
     hostname: broker-1
     container_name: broker-1
+    # Named volume: the default anonymous one is lost when the container is
+    # recreated, leaving Kafka empty while spark-checkpoints still has offsets.
+    volumes:
+      - broker-1-data:/var/lib/kafka/data
     ports:
       - "9092:9092"
     environment:
@@ -68,6 +54,10 @@ services:
     <<: *kafka-common
     hostname: broker-2
     container_name: broker-2
+    # Named volume: the default anonymous one is lost when the container is
+    # recreated, leaving Kafka empty while spark-checkpoints still has offsets.
+    volumes:
+      - broker-2-data:/var/lib/kafka/data
     ports:
       - "9094:9094"
     environment:
@@ -102,7 +92,8 @@ services:
         /opt/kafka/bin/kafka-topics.sh --bootstrap-server broker-1:29092 --describe | grep -E 'Topic:|PartitionCount'
 
   # Event generator. Auto-runs on `compose up` after the topics exist. Uses the
-  # container's (GNU) date to set start = now and end = now + 24h.
+  # container's (GNU) date to set start = now - BACKFILL_DAYS (default 3) and end = now + 24h.
+  # Past-dated events are sent as fast as possible (backfill), then it runs in real time.
   eventsim:
     build: ./eventsim
     image: eventsim:latest
@@ -114,7 +105,7 @@ services:
     entrypoint: ["/bin/bash", "-c"]
     command:
       - |
-        START=$$(date -u +"%Y-%m-%dT%H:%M:%S")
+        START=$$(date -u -d "-$${BACKFILL_DAYS:-3} days" +"%Y-%m-%dT%H:%M:%S")
         END=$$(date -u -d "+24 hours" +"%Y-%m-%dT%H:%M:%S")
         echo "Running eventsim with start=$$START end=$$END"
         exec /opt/eventsim/eventsim.sh \
@@ -122,7 +113,7 @@ services:
           --continuous \
           --start-time "$$START" \
           --end-time "$$END" \
-          --nusers 1000000 \
+          --nusers 500000 \
           --growth-rate 10 \
           --userid 1 \
           --kafkaBrokerList broker-1:29092,broker-2:29092
@@ -178,6 +169,10 @@ services:
         condition: service_started
       hive-metastore-db:
         condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      LAKE_ENV: rest
     restart: unless-stopped
     # cores.max=2 caps this job to half the cluster (2 workers x 2 cores = 4
     # total) so spark-thrift isn't left waiting on slots. No headroom left
@@ -189,6 +184,41 @@ services:
       - --conf
       - spark.cores.max=2
       - /opt/spark/jobs/stream_events.py
+
+  minio:
+    image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+    hostname: minio
+    container_name: minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      # Lets Prometheus scrape /minio/v2/metrics/cluster with no auth.
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+    volumes:
+      - minio-data:/data
+    networks:
+      - my-network
+
+  # One-shot: creates the 'lakehouse' bucket before any Spark job tries to
+  # write to it. Runs to completion, then exits.
+  minio-init:
+    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+    container_name: minio-init
+    depends_on:
+      - minio
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 2; done
+        mc mb --ignore-existing local/lakehouse
+        echo "Bucket ready: lakehouse"
+    networks:
+      - my-network
 
   # Shared Hive metastore DB for spark-streaming + spark-thrift (see
   # spark-conf/hive-site.xml) -- so tables spark-streaming creates are
@@ -246,6 +276,14 @@ services:
       - spark://spark-master:7077
       - --conf
       - spark.cores.max=2
+      # 4 cores total: default 200 shuffle partitions = hundreds of tiny tasks +
+      # tiny Hudi files on MinIO. AQE coalesces them and can broadcast small dims.
+      - --conf
+      - spark.sql.shuffle.partitions=8
+      - --conf
+      - spark.sql.adaptive.enabled=true
+      - --conf
+      - spark.sql.adaptive.coalescePartitions.enabled=true
       - --hiveconf
       - hive.server2.thrift.port=10000
       - --hiveconf
@@ -271,36 +309,38 @@ services:
     networks:
       - my-network
 
-  # postgres:
-  #   image: postgres:14.18
-  #   ports:
-  #     - 5000:5432
-  #   environment:
-  #     POSTGRES_DB: airflow_db
-  #     POSTGRES_USER: airflow
-  #     POSTGRES_PASSWORD: airflow
-  #   volumes:
-  #     - ./postgres/data:/var/lib/postgresql/data
-  #   networks:
-  #     - my-network
-
-  # airflow-scheduler:
-  #   <<: *airflow-common
-  #   command: bash -c "airflow db migrate && airflow scheduler"
-
-  # airflow-webserver:
-  #   <<: *airflow-common
-  #   command: api-server
-  #   ports:
-  #     - 8000:8080
-  #   depends_on:
-  #     - airflow-scheduler
-
-  # airflow-dag-processor:
-  #   <<: *airflow-common
-  #   command: airflow dag-processor
-  #   depends_on:
-  #     - airflow-scheduler
+  # Airflow 3 in `standalone` mode (api-server + scheduler + dag-processor in
+  # one container, SQLite metadata) -- enough for a local demo.
+  # shortcut: SQLite + standalone, not for real load; use postgres + split services then.
+  # Login: admin / admin (dev only; password file is written at start).
+  # dbt runs inside this container (venv from airflow/Dockerfile); Superset
+  # refresh is an HTTP call. No docker socket needed.
+  airflow:
+    build:
+      context: ./airflow
+      additional_contexts:
+        dbt_dir: ./dbt/my_project
+    image: airflow-dbt:latest
+    container_name: airflow
+    # Create the 1-slot pool that serialises everything using spark-thrift.
+    command: >
+      bash -c "echo '{\"admin\": \"admin\"}' > /opt/airflow/simple_auth_manager_passwords.json.generated &&
+      airflow db migrate &&
+      airflow pools set thrift_pool 1 'spark-thrift users' &&
+      exec airflow standalone"
+    ports:
+      - "8000:8080"
+    environment:
+      _PIP_ADDITIONAL_REQUIREMENTS: pyhive[hive_pure_sasl]
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./dbt:/opt/airflow/dbt
+      - ./superset:/opt/airflow/superset:ro
+      - airflow-data:/opt/airflow
+    networks:
+      - my-network
 
   # --- Monitoring stack -------------------------------------------------------
 
@@ -382,6 +422,10 @@ networks:
     name: lakehouse-network
 
 volumes:
+  broker-1-data:
+  broker-2-data:
+  airflow-data:
+  minio-data:
   prometheus-data:
   grafana-data:
   spark-checkpoints:

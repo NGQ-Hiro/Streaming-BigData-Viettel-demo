@@ -58,6 +58,7 @@ postgres
 airflow.env
 airflow/*
 !airflow/dags
+!airflow/Dockerfile
 
 
 **/.env
