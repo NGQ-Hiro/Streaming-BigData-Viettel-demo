@@ -1,22 +1,21 @@
 \section{Results Achieved}
 
-This project achieved its core goal: understanding, first-hand rather than from a diagram, how a modern streaming platform actually works end to end. Building the pipeline meant learning why a Kafka partition needs a follower replica and how that replica takes over on a broker failure, why Structured Streaming's checkpoint has to be separate from the consumer-group offset it also commits, when MERGE\_ON\_READ is worth its read-time merge cost over COPY\_ON\_WRITE, and how a fixed, shared compute budget forces every downstream decision -- bronze table layout, how many dbt models to run, how often a dashboard can refresh -- to fit inside that budget rather than assuming elastic scale.
+This project achieved its core goal: understanding, first-hand, how a modern streaming platform works end to end. Building the pipeline meant learning why a Kafka partition needs a follower replica, why Structured Streaming's checkpoint must be separate from the consumer-group offset it also commits, when MERGE\_ON\_READ is worth its read-time merge cost over COPY\_ON\_WRITE, and how a fixed, shared compute budget shapes every downstream decision.
 
-It also achieved the goal of applying the distributed-systems concepts from the course to a real system instead of studying them in the abstract: partitioning and replication, checkpointed exactly-once processing, and consumer-lag observability were each exercised against a real failure mode, not just described. In doing so, the project confirmed in practice why the streaming-lakehouse combination closes the gaps identified in Section~\ref{sec:problem-before-lakehouses} -- no separate lambda-architecture speed layer duplicating logic, a lake that is transactionally updatable instead of a read-only dump, and storage and compute that scale independently -- and it did so reproducibly, with the whole stack coming up from a single Docker Compose command.
+It also applied the course's distributed-systems concepts -- partitioning and replication, checkpointed exactly-once processing, and consumer-lag observability -- to a real system. In practice, the streaming lakehouse closes the gaps from Section~\ref{sec:problem-before-lakehouses}: no duplicated lambda speed layer, a transactionally updatable lake, and independent storage and compute. The whole stack comes up reproducibly from one Docker Compose command.
 
 \section{Limitations}
 
 \begin{itemize}
-    \item \textbf{Small, fixed-size cluster.} The Spark Standalone cluster totals only 4 cores, shared between the streaming job and the Thrift Server that dbt uses, leaving no headroom for ad-hoc Spark SQL or additional concurrent workloads.
-    \item \textbf{No autoscaling.} Kafka brokers, Spark workers, and other services are fixed at deployment time; the pipeline does not scale resources up or down in response to load.
-    \item \textbf{Synthetic dataset.} Eventsim generates realistic-looking but entirely synthetic user activity over a fixed 10,000-song catalog, so the pipeline has not been validated against real production traffic patterns or data-quality issues.
+    \item \textbf{Small, fixed-size cluster.} The Spark cluster has only 4 cores, shared by the streaming job and the Thrift Server used by dbt, so there is no headroom for ad-hoc Spark SQL.
+    \item \textbf{No autoscaling.} Kafka brokers and Spark workers are fixed at deployment time.
+    \item \textbf{Synthetic dataset.} Eventsim data has not been validated against real traffic patterns or data-quality issues.
 \end{itemize}
-    
+
 \section{Future Directions}
 
 \begin{itemize}
-    \item Replace or augment the synthetic Eventsim data with a real or real-scale streaming dataset to validate the pipeline under realistic data-quality and volume conditions.
-    \item Add autoscaling for the Kafka and Spark clusters (e.g. via a container orchestrator) so cluster capacity can grow with load instead of being fixed at deployment time.
-    \item Extend monitoring and alerting beyond the current Grafana dashboards, e.g. automated alerts on consumer lag thresholds, streaming job failures, or dbt run failures.
-    \item Add a silver layer between bronze and gold once source schemas or data quality no longer stay clean enough for dbt to model gold directly from bronze.
+    \item Validate the pipeline with a real or real-scale streaming dataset.
+    \item Add autoscaling for Kafka and Spark (e.g. via a container orchestrator).
+    \item Add automated alerts (consumer lag, job failures) and a silver layer between bronze and gold.
 \end{itemize}

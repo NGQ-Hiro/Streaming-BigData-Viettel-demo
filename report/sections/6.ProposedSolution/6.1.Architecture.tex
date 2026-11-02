@@ -2,15 +2,16 @@
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.95\textwidth]{overview.png}
-    \caption{Streamify architecture overview}
+    \includegraphics[width=0.8\textwidth]{overview.png}
+    \caption{Streamify architecture overview.}
     \label{fig:overview}
 \end{figure}
 
-Figure~\ref{fig:overview} shows the end-to-end architecture: Eventsim generates events into a Kafka~\cite{kafka} cluster, Spark Structured Streaming~\cite{spark-structured-streaming} consumes and lands them as Hudi~\cite{hudi} bronze tables, dbt transforms the bronze layer into silver dimension tables and gold fact/wide tables on the same Spark cluster, and Superset visualizes the result through the Spark Thrift Server, alongside a Prometheus/Grafana monitoring stack.
+Figure~\ref{fig:overview} shows the end-to-end architecture: Eventsim generates events into a Kafka~\cite{kafka} cluster, Spark Structured Streaming~\cite{spark-structured-streaming} consumes and lands them as Hudi~\cite{hudi} bronze tables, dbt transforms the bronze layer into silver dimension tables and gold fact/wide tables on the same Spark cluster, Superset visualizes the result through the Spark Thrift Server, and Airflow schedules the dbt, dashboard-refresh and compaction jobs, alongside a Prometheus/Grafana monitoring stack.
 
-\begin{table}[H]
+\begin{table}[!htbp]
     \centering
+    \small
     \begin{tabulary}{\textwidth}{|p{3.5cm}|p{4cm}|L|}
         \hline
         \textbf{Layer} & \textbf{Tool} & \textbf{Role} \\
@@ -25,7 +26,9 @@ Figure~\ref{fig:overview} shows the end-to-end architecture: Eventsim generates 
         \hline
         Compute cluster & Spark Standalone (1 master, 2 workers) & Shared by the streaming job and dbt (via Thrift), 4 cores total \\
         \hline
-        Transformation & dbt (\texttt{dbt-spark}, \texttt{method: thrift}) & SQL-based star schema and wide-table modelling, submitted via the Spark Thrift Server \\
+        Transformation & dbt (\texttt{dbt-spark}, \texttt{method: thrift}) & SQL-based star schema and wide-table modelling, incremental \texttt{merge} by key, submitted via the Spark Thrift Server \\
+        \hline
+        Orchestration & Apache Airflow 3 & Runs dbt and the Superset refresh every 30 minutes and Hudi compaction every 6 hours, one job at a time through the Thrift Server \\
         \hline
         Visualization & Apache Superset & Dashboards connected to the Spark Thrift Server \\
         \hline
@@ -37,21 +40,22 @@ Figure~\ref{fig:overview} shows the end-to-end architecture: Eventsim generates 
     \caption{Technology stack per pipeline layer.}
 \end{table}
 
-The remainder of this chapter walks through the pipeline one layer at a time -- ingestion, stream processing, storage, transformation, and serving -- followed by how the whole stack is deployed. Each layer section closes with a short note on why that specific tool was chosen, cross-referencing the fuller alternatives-and-trade-offs discussion in Chapter~\ref{ch:related-work-background}.
+The rest of this chapter walks through the layers one by one, then the deployment. Each layer ends with a short note on why the tool was chosen (see Chapter~\ref{ch:related-work-background}).
 
 
 \section{Storage Layer}
+\label{sec:storage-layer}
 
-Tables are Hudi-managed, backed by MinIO~\cite{minio}/S3 locally or real S3 in \texttt{aws} mode via the Hadoop S3A connector, with no rebuild needed to switch between the two -- only an environment variable (\texttt{LAKE\_ENV}). There is no separate catalog service: each table is self-describing at its storage path (a \texttt{.hoodie/} metadata directory) and is (re-)registered into Spark's catalog idempotently at job startup. Bronze tables use the MERGE\_ON\_READ table type, so fast streaming appends land as delta log files that are periodically compacted into columnar base files; silver, gold, and seed tables use COPY\_ON\_WRITE, rebuilt via full overwrite.
+Tables are Hudi-managed, backed by MinIO~\cite{minio} (S3-compatible) via the Hadoop S3A connector. There is no separate catalog service: each table is self-describing at its storage path (a \texttt{.hoodie/} metadata directory) and is (re-)registered into Spark's catalog idempotently at job startup. Bronze tables use the MERGE\_ON\_READ table type, so streaming writes are cheap and any delta log files are merged into columnar base files by a scheduled compaction job (Section~\ref{sec:orchestration-layer}); silver, gold, and seed tables use COPY\_ON\_WRITE, where dbt merges new rows into the existing files.
 
-\textbf{Why Hudi, and why MOR bronze / COW silver and gold.} Hudi's self-describing \texttt{.hoodie/} metadata avoids the extra catalog or warehouse service that plain Parquet or Snowflake would require. Bronze uses MOR to keep frequent streaming appends cheap; silver and gold use COW because each is rebuilt once per run and then read repeatedly -- by downstream dbt models or by Superset.
+\textbf{Why Hudi, and why MOR bronze / COW silver and gold.} Hudi's self-describing \texttt{.hoodie/} metadata avoids the extra catalog or warehouse service that plain Parquet or Snowflake would require. Bronze uses MOR to keep frequent streaming appends cheap; silver and gold use COW because they are written in batches by dbt and then read repeatedly -- by downstream dbt models or by Superset. The bronze writer currently uses Hudi's \texttt{insert} operation, which adds new Parquet files and no log files, so compaction finds nothing to merge until updates or deletes reach a bronze table.
 
 \section{Ingestion Layer}
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.8\textwidth]{4/kafka_architecture.png}
-    \caption{Kafka internal architecture: 2-node KRaft cluster, 3 partitions per topic, replication factor 2.}
+    \includegraphics[width=0.4\textwidth]{4/kafka_architecture.png}
+    \caption{Kafka cluster: 2 KRaft nodes, 3 partitions per topic, replication factor 2.}
     \label{fig:kafka-architecture}
 \end{figure}
 
@@ -60,28 +64,27 @@ Eventsim simulates a real-world user base, generating page-view and song-play ev
 Because KRaft mode is used, each broker itself also acts as a metadata/controller node, removing the need for a separate ZooKeeper ensemble. For each topic, the 3 partitions are spread across the two brokers, and because replication factor is 2, every partition is fully replicated: one broker holds the leader replica for a given partition and the other holds the follower replica, and the two brokers swap this role across partitions so that neither broker is leader for every partition of a topic. Producers (Eventsim) and consumers (the Spark Structured Streaming job) always read from and write to the leader replica of a partition; the follower replica only pulls data from the leader to stay in sync, and takes over as leader if its broker fails. This is what gives the cluster broker-level fault tolerance despite running on just two nodes.
 
 \section{Stream \& Batch Processing Layer}
+\label{sec:proposed-cluster-setup}
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.8\textwidth]{4/spark_architecture.png}
-    \caption{Spark cluster architecture: driver, master, and worker/executor processes.}
+    \includegraphics[width=0.4\textwidth]{4/spark_architecture.png}
+    \caption{Spark cluster: driver, master, workers and executors.}
     \label{fig:spark-architecture}
 \end{figure}
 
-The Spark Standalone cluster shown in Figure~\ref{fig:spark-architecture} runs both the streaming job and dbt's batch queries. A \emph{driver} process plans a job and schedules its tasks; the \emph{master} tracks which workers are free and grants the driver executor slots on them; each \emph{worker} then launches one or more \emph{executor} processes that run the driver's tasks and cache data. The streaming job's driver is submitted once and keeps its executor slots for the life of the pipeline, while dbt submits short-lived batch queries through the Thrift Server on the same cluster.
+The whole stack runs on one machine from a single \texttt{docker-compose.yml}. Its Spark Standalone cluster, shown in Figure~\ref{fig:spark-architecture}, has 1 master and 2 workers with 2 cores / 2 GB each (4 cores in total), and runs both the streaming job and dbt's batch queries; the streaming job and the Thrift Server take 2 cores each. A \emph{driver} process plans a job and schedules its tasks; the \emph{master} tracks which workers are free and grants the driver executor slots on them; each \emph{worker} then launches one or more \emph{executor} processes that run the driver's tasks and cache data. The streaming job's driver is submitted once and keeps its executor slots for the life of the pipeline, while dbt submits short-lived batch queries through the Thrift Server on the same cluster.
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.8\textwidth]{4/spark_batch_streaming_processing.png}
-    \caption{Spark Structured Streaming's micro-batch model: an unbounded stream is sliced into small batches, each run as an ordinary Spark batch job.}
+    \includegraphics[width=0.4\textwidth]{4/spark_batch_streaming_processing.png}
+    \caption{Micro-batch model: the stream is cut into small Spark batch jobs.}
     \label{fig:spark-micro-batch}
 \end{figure}
 
 Two layers of work share this cluster. The \emph{streaming layer} is the long-running ingestion job: it consumes all three Kafka topics, fixes latin1-mojibake on text fields, derives time columns, and appends each micro-batch to bronze Hudi tables (\texttt{staging.<topic>}). The \emph{batch layer} is everything downstream of bronze -- dbt and Superset: dbt runs on the same Spark cluster as the streaming job, reading the bronze Hudi tables and writing the silver and gold Hudi tables, and Superset connects to the Spark Thrift Server to query the gold tables for visualization.
 
 Structured Streaming does not process events one at a time. Instead, as Figure~\ref{fig:spark-micro-batch} shows, the driver repeatedly polls the three Kafka topics for new offsets, groups the newly available records into a micro-batch, and schedules that micro-batch as a short-lived Spark job whose tasks run on the worker executors, in the same way a batch job would.
-
-The streaming job runs as a driver program submitted to the Spark Standalone cluster described in Section~\ref{sec:proposed-cluster-setup} (1 master, 2 workers, 4 cores total, shared with the Thrift Server dbt submits through). Each micro-batch's tasks read their assigned Kafka partitions, decode and enrich the events (\texttt{spark\_streaming/jobs/stream\_events.py}), and append the results to the bronze Hudi tables before the driver commits the checkpoint and moves on to the next batch. Because this job and the Thrift Server share the same 4-core cluster, the size and frequency of micro-batches are bounded by whatever cores are not already claimed by the Thrift Server at that moment.
 
 Structured Streaming resumes from a persisted checkpoint volume (\texttt{spark-checkpoints}) on restart; each micro-batch also commits its Kafka offsets to a \texttt{streamify-<topic>} consumer group purely so lag is visible in Grafana (Spark itself never depends on that commit to resume).
 
@@ -90,8 +93,8 @@ Structured Streaming resumes from a persisted checkpoint volume (\texttt{spark-c
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.7\textwidth]{star_schema.png}
-    \caption{Star schema: \texttt{fact\_streams} and its five dimension tables.}
+    \includegraphics[width=0.35\textwidth]{star_schema.png}
+    \caption{Star schema: \texttt{fact\_streams} and five dimensions.}
     \label{fig:star-schema}
 \end{figure}
 
@@ -105,51 +108,71 @@ The transformation layer turns each bronze Hudi table into an analytical data mo
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.7\textwidth]{dbt_graph.png}
-    \caption{dbt DAG showing the dependency between bronze sources, the star schema, and \texttt{wide\_streams}.}
+    \includegraphics[width=0.35\textwidth]{dbt_graph.png}
+    \caption{dbt DAG: bronze sources, star schema, \texttt{wide\_streams}.}
     \label{fig:dbt-graph}
 \end{figure}
 
-Rather than hand-writing this as Spark job code, dbt~\cite{dbt} acts as a SQL abstraction layer above the same Spark cluster: it generates the underlying Spark SQL and submits it through the Spark Thrift Server (\texttt{method: thrift}), materializing every silver and gold model as a COPY\_ON\_WRITE Hudi table rebuilt via full overwrite each run. dbt builds a DAG of models -- declared in \texttt{dbt\_project.yml}, with each model a SQL query under \texttt{models/} -- where every model transforms one or more upstream models into a new table. Figure~\ref{fig:dbt-graph} shows the resulting DAG, with bronze sources at the bottom, the silver dimension tables next, the gold \texttt{fact\_streams} after that, and \texttt{wide\_streams} at the top.
+Instead of hand-written Spark jobs, dbt~\cite{dbt} generates the Spark SQL and submits it through the Spark Thrift Server (\texttt{method: thrift}), materializing every silver and gold model as a COPY\_ON\_WRITE Hudi table. The fact table, the wide table and the user and location dimensions are incremental models that \texttt{merge} new rows by a unique key; the other dimensions are rewritten per partition with \texttt{insert\_overwrite}. dbt builds a DAG of models -- declared in \texttt{dbt\_project.yml}, with each model a SQL query under \texttt{models/} -- where every model transforms one or more upstream models into a new table. Figure~\ref{fig:dbt-graph} shows the resulting DAG, with bronze sources at the bottom, the silver dimension tables next, the gold \texttt{fact\_streams} after that, and \texttt{wide\_streams} at the top.
 
-\textbf{Why dbt, and why both a star schema and a wide table.} dbt was chosen over a layer of hand-written Spark SQL scripts because it declares model dependencies explicitly (via \texttt{ref()}/\texttt{source()}), runs a built-in test framework against every model (uniqueness, not-null, referential integrity), generates documentation from the same source files, and is friendlier to iterate on during development -- properties that matter given the five-dimension join the fact table depends on. Modelling both a star schema and a separate wide table, rather than either alone, keeps normalization and storage efficiency in the star schema while keeping BI query simplicity in \texttt{wide\_streams}, instead of trading one off against the other.
+\textbf{Why dbt, and why both a star schema and a wide table.} dbt declares model dependencies explicitly (via \texttt{ref()}/\texttt{source()}), runs built-in tests (uniqueness, not-null, referential integrity) and generates documentation from the same files, which matters for a fact table that depends on five dimensions. The star schema keeps normalization and storage efficiency, while \texttt{wide\_streams} keeps BI queries simple.
 
 \section{Serving Layer}
 \label{sec:serving-layer}
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.95\textwidth]{dashboard.png}
-    \caption{Superset results dashboard, built on top of \texttt{wide\_streams} and queried through the Spark Thrift Server.}
+    \includegraphics[width=0.65\textwidth]{dashboard.png}
+    \caption{Superset dashboard on \texttt{wide\_streams}, queried via Spark Thrift Server.}
     \label{fig:results-dashboard}
 \end{figure}
 
-Apache Superset~\cite{superset} connects to the same Spark Thrift Server that dbt submits SQL through, querying the \texttt{wide\_streams} model to visualize insights through interactive dashboards (\texttt{superset/provision\_dashboard.py} provisions them via the REST API). Figure~\ref{fig:results-dashboard} shows the resulting dashboard layout, giving end users a single, pre-joined table to explore without needing to understand the star schema behind it.
+Apache Superset~\cite{superset} connects to the same Spark Thrift Server that dbt submits SQL through, querying the \texttt{wide\_streams} model to visualize insights through interactive dashboards (\texttt{superset/provision\_dashboard.py} provisions them via the REST API). Figure~\ref{fig:results-dashboard} shows the resulting dashboard layout.
 
-Superset ships a native Thrift/HiveServer2-compatible connector that talks directly to the Spark Thrift Server endpoint already used by dbt, needing no extra license or gateway infrastructure, unlike Power BI or Tableau.
+\section{Orchestration Layer}
+\label{sec:orchestration-layer}
+
+Streaming runs all the time, but the rest of the pipeline has to be started by something: dbt must rebuild the models, the dashboard must pick up the new columns, and the Hudi tables need maintenance from time to time. At first these steps were run by hand, which is easy to forget. Apache Airflow 3 now does this. It runs as one container in standalone mode, which is enough for a single-machine demo. The DAGs are unpaused when created, so the schedules start as soon as the stack is up.
+
+\begin{figure}[!htbp]
+    \centering
+    \begin{minipage}{0.49\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{airflow_pipeline.png}
+        \caption{\texttt{full\_pipeline} DAG, every 30 min. The red run failed before the seed fix.}
+        \label{fig:airflow-pipeline}
+    \end{minipage}\hfill
+    \begin{minipage}{0.49\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{airflow_compact.png}
+        \caption{\texttt{spark\_compact} DAG, every 6 h, one \texttt{compact} task.}
+        \label{fig:airflow-compact}
+    \end{minipage}
+\end{figure}
+
+There are three DAGs (Figures~\ref{fig:airflow-pipeline} and~\ref{fig:airflow-compact}). \texttt{full\_pipeline} runs every 30 minutes and has two tasks. The first, \texttt{dbt\_run}, loads the \texttt{state\_codes} seed and then runs all dbt models. The seed step is needed because \texttt{dbt run} does not create seed tables, and \texttt{dim\_locations} reads from one. The second task, \texttt{refresh\_superset}, first runs the dashboard provisioning script and then refreshes the dataset columns. The provisioning script is safe to repeat: it creates the dataset and dashboard only when they are missing. We added it after a fresh stack failed with ``dataset not found'', because the refresh ran before anything had created the dataset.
+
+\texttt{spark\_compact} runs every 6 hours and calls Hudi's \texttt{run\_compaction} for each of the three bronze MOR tables. Hudi's default lock provider needs an atomic file create, which S3A does not offer, so the first runs failed with an ``unsupported scheme'' error. The job now passes an in-process lock provider in the call options. This lock only protects against other writers inside the Thrift Server, not against the streaming job, which is a separate process; a production system would need a Hive-metastore or ZooKeeper lock. Today every call returns an empty list, because the streaming writer only adds new Parquet files and never creates the log files that compaction merges (Section~\ref{sec:storage-layer}). The job is ready, but has real work only once updates or deletes reach a bronze table. The third DAG, \texttt{dbt\_adhoc}, is started by hand and shows a small form where the user picks the dbt command, the model selection and whether to do a full refresh, so one-off runs need no code change.
+
+All three DAGs send SQL to the same Spark Thrift Server instead of starting their own Spark applications, since the cluster has no free core for another one (Section~\ref{sec:proposed-cluster-setup}). Two of them at once would compete for the Thrift Server's 2 cores, so they share an Airflow pool called \texttt{thrift\_pool} with a single slot and take turns. dbt itself is installed in its own virtual environment inside the Airflow image, with its packages fetched at image build time.
 
 \section{Monitoring Layer}
 \label{sec:monitoring-layer}
 
 \begin{figure}[H]
     \centering
-    \includegraphics[width=0.7\textwidth]{grafana_kafka.png}
-    \caption{Grafana Kafka Lag dashboard: consumer-group lag and consumption rate per topic.}
-    \label{fig:grafana-kafka}
+    \begin{minipage}{0.49\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{grafana_kafka.png}
+        \caption{Grafana Kafka dashboard: consumer lag and rate per topic.}
+        \label{fig:grafana-kafka}
+    \end{minipage}\hfill
+    \begin{minipage}{0.49\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{grafana_spark.png}
+        \caption{Grafana Spark dashboard: job metrics, JVM heap, container CPU/memory.}
+        \label{fig:grafana-spark}
+    \end{minipage}
 \end{figure}
 
-\begin{figure}[H]
-    \centering
-    \includegraphics[width=0.7\textwidth]{grafana_spark.png}
-    \caption{Grafana Spark dashboard: streaming/batch job metrics, JVM heap, and per-container CPU/memory.}
-    \label{fig:grafana-spark}
-\end{figure}
-
-Three exporters feed the same Prometheus instance: kafka-exporter scrapes each consumer group's per-partition lag directly from Kafka, Spark's built-in metrics endpoint exposes streaming/batch job counters and JVM heap usage, and cAdvisor reports per-container CPU and memory for every service in the stack. Grafana queries Prometheus and renders the two dashboards in Figures~\ref{fig:grafana-kafka} and~\ref{fig:grafana-spark}: Kafka consumer-group lag and consumption rate per topic, and Spark job/JVM/container metrics. This gives qualitative evidence of the pipeline's throughput and health under load, rather than a formal benchmark.
-
-\section{Deployment \& Environment}
-\label{sec:proposed-cluster-setup}
-
-The whole stack is deployed with Docker Compose (\texttt{docker-compose.yml}), with a \texttt{docker-compose.dev.yml} overlay that adds MinIO for local, S3-free development. Spark runs as a Standalone cluster of 1 master and 2 workers, 2 cores / 2 GB each (4 cores total), shared between the streaming ingestion job and the Spark Thrift Server that dbt submits SQL through, each capped at 2 cores.
-
-\textbf{Why Spark Standalone at this size.} Spark Standalone was chosen over YARN or Kubernetes because both alternatives add a separate resource-management control plane that is not justified when the entire compute budget is 4 cores across one master and two workers; Standalone instead runs as three containers alongside the rest of the pipeline in the same \texttt{docker-compose.yml}. The direct consequence is that the streaming job and the Thrift Server, each capped at a fixed 2 cores, together already consume the entire cluster, leaving no headroom for ad-hoc Spark SQL while both are running.
+Three exporters feed one Prometheus instance: kafka-exporter (consumer-group lag per partition), Spark's metrics endpoint (streaming/batch counters, JVM heap) and cAdvisor (per-container CPU and memory). Grafana renders them in Figures~\ref{fig:grafana-kafka} and~\ref{fig:grafana-spark}.

@@ -1,6 +1,6 @@
 % !TEX program = xelatex
 \documentclass[12pt]{report}
-\usepackage[fontsize=13pt]{scrextend}
+\usepackage[fontsize=12pt]{scrextend}
 \usepackage[a4paper,top=2cm,bottom=2cm,left=3cm,right=2cm]{geometry}
 % \usepackage{svg}
 \usepackage{tgtermes}
@@ -22,7 +22,7 @@
 \usepackage{titlesec}
 \usepackage{listings}
 \usepackage{lscape}
-\linespread{1.5}
+\linespread{1.15}
 \usepackage[hypertexnames=false]{hyperref}
 \usepackage{longtable}
 \hypersetup{
@@ -47,7 +47,7 @@
 
 \newcommand{\Khang}[1]{\textcolor{red!70!pink}{\textbf{\textit{#1}}}}
 
-\graphicspath{{images/}{../image/}}
+\graphicspath{{../image/}}
 
 % Define chapter font size to be 15pt
 \titleformat{\chapter}[display]{\normalfont\huge\bfseries}{\chaptertitlename\ \thechapter}{20pt}{\Huge}
@@ -72,9 +72,10 @@
 
 % \input{sections/list-of-abbreviations}
 
+\setcounter{tocdepth}{1}
 \input{sections/contents}
 
-\listoftables
+% list of tables dropped: only one table, saves a page
 \newpage
 
 \listoffigures
@@ -101,7 +102,7 @@
 
 % \input{sections/2.RelatedWorkAndBackground/2.2.Alternative-technologies}
 
-\chapter{Problem Statement and Challenges}
+\chapter{Problem Statement}
 \label{ch:problem-statement}
 
 \input{sections/4.ProblemStatement/4.1.Dataset-and-challenges}

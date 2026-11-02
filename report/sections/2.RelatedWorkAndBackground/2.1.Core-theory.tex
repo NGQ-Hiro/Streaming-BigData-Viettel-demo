@@ -27,7 +27,7 @@ These are the distributed-systems problems that the rest of this section's conce
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.7\textwidth]{2/message_queue.png}
-    \caption{Producers and consumers decoupled through a publish-subscribe message queue.}
+    \caption{Pub-sub message queue decoupling producers and consumers.}
     \label{fig:message-queue}
 \end{figure}
 
@@ -38,7 +38,7 @@ Event streaming treats data as an unbounded sequence of immutable events (e.g. `
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.7\textwidth]{2/batch_steaming_processing.png}
-    \caption{Batch processing versus streaming (event-at-a-time and micro-batching).}
+    \caption{Batch versus streaming (event-at-a-time and micro-batch).}
     \label{fig:batch-streaming}
 \end{figure}
 
@@ -61,7 +61,7 @@ Either execution model still reads its input positions (offsets) from the upstre
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.7\textwidth]{2/storage_layer.png}
-    \caption{Object storage versus the table abstraction built on top of it.}
+    \caption{Object storage and the table layer on top of it.}
     \label{fig:storage-layer}
 \end{figure}
 
@@ -78,7 +78,7 @@ A lakehouse is built on object storage because it is cheap, horizontally scalabl
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.7\textwidth]{2/overview_open_table_format.png}
-    \caption{Overview of an open table format, contrasting copy-on-write and merge-on-read.}
+    \caption{Open table format: copy-on-write versus merge-on-read.}
     \label{fig:open-table-format}
 \end{figure}
 
@@ -96,7 +96,7 @@ MOR suits high-frequency streaming appends, where write latency matters most; CO
 \begin{figure}[H]
     \centering
     \includegraphics[width=0.7\textwidth]{2/medalion_architecture.png}
-    \caption{Medallion architecture: successive bronze-to-gold refinement layers.}
+    \caption{Medallion architecture: bronze, silver, gold.}
     \label{fig:medallion}
 \end{figure}
 

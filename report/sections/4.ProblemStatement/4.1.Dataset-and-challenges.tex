@@ -1,38 +1,50 @@
 \section{The Problem Before Streaming Lakehouses}
 \label{sec:problem-before-lakehouses}
 
-Chapter~\ref{ch:related-work-background} introduced the pieces a streaming lakehouse is built from: message queues, stream processing engines, open table formats, and medallion layering. None of these are new inventions on their own -- what is comparatively recent is combining them into a single pattern. Before that combination existed, teams that wanted both fresh data and a queryable, transactional lake had to work around four gaps, described below.
+Before message queues, stream engines, and open table formats were combined into one pattern (Chapter~\ref{ch:related-work-background}), teams that wanted both fresh data and a queryable, transactional lake had to work around four gaps.
 
 \subsection{Latency of Batch ETL}
 
-As Section~\ref{sec:why-realtime} already covers, a warehouse fed by scheduled batch loads is always some distance behind reality: dashboards and models reflect the last load, not the current state of the system. This was simply accepted as the cost of running a warehouse-centric stack, because the tools available -- scheduled ETL jobs writing into a warehouse -- had no continuous alternative.
+As Section~\ref{sec:why-realtime} covers, a warehouse fed by scheduled batch loads is always behind reality: dashboards reflect the last load, not the current state. This was accepted because scheduled ETL had no continuous alternative. Figure~\ref{fig:elt-latency} shows the pattern: many sources are extracted, transformed, and loaded in one scheduled pass.
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=0.38\textwidth]{ELT-latency.png}
+    \caption{Batch ETL: extract, transform, load on a schedule.}
+    \label{fig:elt-latency}
+\end{figure}
+
 
 \subsection{Lambda-Architecture Complexity}
 
-The historical fix for that lag was the \emph{lambda architecture}: a batch layer computing correct, complete results on a schedule, and a separate real-time \emph{speed layer} computing approximate, low-latency results in between batch runs, with the two reconciled downstream. The catch is that the speed layer and the batch layer are usually two different systems with two different codebases, both implementing the same business logic. Keeping them consistent means writing every transformation twice and manually verifying the two never drift apart -- an ongoing operational cost and a recurring source of subtle bugs whenever one side changes and the other does not.
+The historical fix was the \emph{lambda architecture}: a batch layer computing complete results on a schedule, plus a separate real-time \emph{speed layer} for low-latency results in between. The catch is two systems and two codebases implementing the same business logic. Every transformation is written twice and the two can drift apart, a recurring source of subtle bugs. Figure~\ref{fig:lambda} shows the two parallel paths that meet in a serving layer.
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=0.38\textwidth]{lambda.png}
+    \caption{Lambda architecture: batch and speed layers feed one serving layer.}
+    \label{fig:lambda}
+\end{figure}
+
 
 \subsection{No Serving Layer on the Data Lake}
 
-Plain object storage holding raw files (Parquet on S3 or HDFS, without an open table format on top) has no row-level insert, update, or delete, no ACID transactions, and no time travel -- it can only store and return whole objects, as Section~\ref{sec:core-theory} explains. In practice this made the lake a read-only, append-only dump: useful for cheap bulk storage, but unusable as a serving layer for anything that needed a consistent, updatable view of the data. Any workload that needed transactional guarantees had to bypass the lake entirely and go through a separate data warehouse, adding a second copy of the data and another ETL hop to keep it in sync.
+Plain object storage with raw files (Parquet on S3 or HDFS, without an open table format) has no row-level updates, no ACID transactions, and no time travel (Section~\ref{sec:core-theory}). The lake was an append-only dump, unusable as a serving layer. Workloads needing transactions had to go through a separate warehouse, adding a second copy of the data and another ETL hop. Without control over what lands in the lake, it turns into a \emph{data swamp} (Figure~\ref{fig:data-swamp}).
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=0.42\textwidth]{data_swamp.png}
+    \caption{Data swamp: unmanaged lake data is hard to trust.}
+    \label{fig:data-swamp}
+\end{figure}
+
 
 \subsection{Storage and Compute Coupled in the Warehouse}
 
-Traditional data warehouses bundle storage and compute into one system, so scaling one means paying for the other whether it is needed or not. Combined with the previous point, this pushed teams into keeping two copies of the same data: a cheap, raw copy in the lake, and a structured, query-ready copy in the warehouse, doubling both storage cost and the pipeline work needed to keep the copies aligned.
+Traditional warehouses bundle storage and compute, so scaling one means paying for the other. Together with the previous point, teams kept two copies of the data (raw in the lake, structured in the warehouse), doubling storage cost and sync work. Figure~\ref{fig:decouple} shows the fix: compute and storage scale on their own.
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=0.38\textwidth]{decouple_storage_compute.png}
+    \caption{Coupled (left) versus decoupled (right) compute and storage.}
+    \label{fig:decouple}
+\end{figure}
 
-Combining a stream processing engine with an open table format (Section~\ref{sec:core-theory}) closes this gap: bronze tables backed by object storage stay cheap, gain COW/MOR transactional writes and upserts, and are fed continuously by a streaming engine rather than on a batch schedule -- the \emph{streaming lakehouse} this report builds.
 
-\section{Technical Challenges}
-
-Section~\ref{sec:problem-before-lakehouses} argued why the streaming-lakehouse paradigm itself is needed. This section is about a different, narrower question: what was concretely hard about building \emph{this} pipeline on top of that paradigm. Streamify's data source is Eventsim, which continuously emits synthetic music-streaming events across three Kafka topics -- \texttt{listen\_events}, \texttt{page\_view\_events}, and \texttt{auth\_events} -- rather than arriving in scheduled batches. Building a streaming lakehouse pipeline on top of this dataset surfaces, in a small and reproducible setting, the same distributed-systems problems introduced in Section~\ref{sec:why-realtime}: keeping up with a continuous arrival rate, tolerating faults without losing or duplicating data, sharing a fixed compute budget, and handling messy real-world join keys. The rest of this section works through each one as it appears in this project.
-
-\subsection{Streaming Volume and Velocity}
-
-Eventsim continuously emits events across three topics, so the pipeline must ingest, decode, and land data in the lakehouse without falling behind the producer. This requires a message queue that can buffer and parallelize consumption (Kafka, partitioned per topic) and a streaming engine that can keep its micro-batch processing time below the arrival rate.
-
-\subsection{Exactly-once, Fault-tolerant Processing on a 2-node Kafka Cluster}
-
-Kafka runs as a 2-node KRaft cluster (no ZooKeeper), with each topic replicated across both brokers (replication factor 2, 3 partitions per topic). With only two brokers, the cluster must keep serving every partition if either single broker is restarted or fails, while Spark Structured Streaming must resume exactly where it left off after any restart. This project relies on Structured Streaming's checkpointed offsets (persisted to a durable checkpoint volume) as the source of truth for resuming the stream, and on Kafka's per-partition replication across the two brokers for broker-level fault tolerance.
-
-\subsection{Computing and Partitioning on a Small, Shared Spark Cluster}
-
-The Spark Standalone cluster totals only 4 cores across one master and two workers (2 cores / 2 GB each), and those 4 cores are shared between two long-running applications: the Spark Structured Streaming ingestion job (capped at 2 cores) and the Spark Thrift Server that dbt submits its SQL transformations through (also capped at 2 cores). This leaves no spare capacity for ad-hoc Spark SQL at this cluster size, and means both the streaming job's micro-batch partitioning and dbt's batch transformation jobs must fit within their fixed 2-core budget rather than being able to scale out elastically.
+A stream engine plus an open table format (Section~\ref{sec:core-theory}) closes these gaps: bronze tables on object storage stay cheap, gain COW/MOR transactional writes, and are fed continuously -- the \emph{streaming lakehouse} this report builds.
