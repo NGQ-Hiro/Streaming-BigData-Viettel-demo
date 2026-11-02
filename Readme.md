@@ -27,12 +27,13 @@ The project follows a modern lakehouse (ELT) architecture:
 | Data simulation | Eventsim | Generates synthetic music-streaming events based on the Million Songs Dataset |
 | Message queue | Apache Kafka 4.3 (KRaft) | 2-node cluster, replication factor 2, 3 partitions per topic — no Zookeeper |
 | Stream processing | Apache Spark Structured Streaming (3.5.3) | Reads Kafka, decodes/enriches events, writes bronze tables to Hudi |
-| Table format / storage | Apache Hudi | MERGE_ON_READ bronze streaming tables, COPY_ON_WRITE gold/seed tables; MinIO (S3-compatible) locally, real S3 in `aws` mode via the Hadoop S3A connector (`s3a://`) — no separate catalog service, tables self-describe via a `.hoodie/` metadata directory and are registered into Spark's built-in catalog on startup; dev-vs-aws mode is picked by the `LAKE_ENV` env var (`rest`/`glue`) read at container start |
+| Table format / storage | Apache Hudi | MERGE_ON_READ bronze streaming tables, COPY_ON_WRITE gold/seed tables; MinIO (S3-compatible) via the Hadoop S3A connector (`s3a://`) — no separate catalog service, tables self-describe via a `.hoodie/` metadata directory and are registered into Spark's built-in catalog on startup |
 | Compute cluster | Spark Standalone (1 master, 2 workers) | Shared by the streaming job and dbt (via Thrift) — no headroom left for ad-hoc Spark SQL at this size |
 | Transformation | dbt (`dbt-spark`, `method: thrift`) | SQL-based star schema and wide-table modelling, submitted to the Spark cluster via the Spark Thrift Server |
 | Visualisation | Apache Superset | Dashboards connected to the Spark Thrift Server (HiveServer2-compatible) |
+| Orchestration | Apache Airflow 3 | `full_pipeline` (dbt + Superset refresh) every 30 min, `spark_compact` (Hudi compaction) every 6 h, `dbt_adhoc` on demand; all use the Thrift Server one at a time (`thrift_pool`) |
 | Monitoring | Prometheus, Grafana, cAdvisor | Kafka consumer-group lag, Spark JVM/streaming metrics, per-container CPU/memory |
-| Containerisation | Docker Compose | Single-command reproducible deployment; `docker-compose.dev.yml` overlay adds MinIO for local dev |
+| Containerisation | Docker Compose | Single-command reproducible deployment |
 
 ### Scaling Design
 
@@ -50,18 +51,20 @@ The project follows a modern lakehouse (ELT) architecture:
 |---|---|
 | Spark Master UI | http://localhost:8086 |
 | Spark Worker UI | http://localhost:8087-8088 |
+| Airflow | http://localhost:8000 (login: see `docker-compose.yml`) |
 | Superset | http://localhost:8888 |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 |
-| MinIO Console (dev only) | http://localhost:9001 |
+| MinIO Console | http://localhost:9001 |
 
 1.  **Data Simulation (Eventsim):** Real-time music event data (e.g., page views, song plays) is generated using **[Eventsim](https://github.com/Interana/eventsim)** to simulate a real-world user base.
 2.  **Ingestion & Messaging (Kafka):** The raw event data is captured by **Apache Kafka 4.3** running in **KRaft mode** (no Zookeeper) as a 2-node cluster. Each topic has 3 partitions with replication factor 2 for fault tolerance.
-3.  **Real-Time Processing (Spark Structured Streaming):** A long-running Spark job consumes all three topics, fixes latin1-mojibake on text fields, derives time columns, and appends each micro-batch to bronze Hudi tables (`staging.<topic>`), using the MERGE_ON_READ table type so fast streaming appends land as delta log files, periodically compacted into columnar base files.
-4.  **Lakehouse Storage (Hudi):** Tables are Hudi-managed, backed by MinIO/S3 locally or real S3 in `aws` mode via the Hadoop S3A connector — no rebuild needed to switch, just an env var. There is no separate catalog service; each table is self-describing at its storage path (a `.hoodie/` metadata directory) and is (re-)registered into Spark's catalog idempotently at job startup.
-5.  **Data Transformation (dbt):** dbt connects to the Spark cluster via the **Spark Thrift Server** (`method: thrift`) and builds a clean, analytics-ready **star schema** plus a denormalized wide table, straight on top of the bronze Hudi tables, materialized as COPY_ON_WRITE Hudi tables rebuilt via full overwrite each run.
+3.  **Real-Time Processing (Spark Structured Streaming):** A long-running Spark job consumes all three topics, fixes latin1-mojibake on text fields, derives time columns, and appends each micro-batch to bronze Hudi tables (`staging.<topic>`), using the MERGE_ON_READ table type. Any delta log files are merged into base files by the `spark_compact` Airflow DAG (the writer uses `insert`, so today it only adds Parquet files and compaction finds nothing to merge).
+4.  **Lakehouse Storage (Hudi):** Tables are Hudi-managed, backed by MinIO (S3-compatible) via the Hadoop S3A connector. There is no separate catalog service; each table is self-describing at its storage path (a `.hoodie/` metadata directory) and is (re-)registered into Spark's catalog idempotently at job startup.
+5.  **Data Transformation (dbt):** dbt connects to the Spark cluster via the **Spark Thrift Server** (`method: thrift`) and builds a clean, analytics-ready **star schema** plus a denormalized wide table, straight on top of the bronze Hudi tables, materialized as COPY_ON_WRITE Hudi tables, as incremental models that `merge` new rows by key (or `insert_overwrite` for the small dimensions).
 6.  **Business Intelligence (Apache Superset):** **Apache Superset** connects to the same **Spark Thrift Server**, querying the `wide_streams` model to visualize insights through interactive dashboards.
-7.  **Monitoring (Prometheus & Grafana):** **Prometheus** scrapes Kafka consumer-group lag (via kafka-exporter), Spark's built-in Prometheus metrics, and per-container stats (via cAdvisor). **Grafana** visualizes all of it across dashboards.
+7.  **Orchestration (Airflow):** `full_pipeline` runs dbt and refreshes the Superset dataset every 30 minutes, and `spark_compact` runs Hudi compaction every 6 hours. Both send SQL through the Spark Thrift Server, one at a time.
+8.  **Monitoring (Prometheus & Grafana):** **Prometheus** scrapes Kafka consumer-group lag (via kafka-exporter), Spark's built-in Prometheus metrics, and per-container stats (via cAdvisor). **Grafana** visualizes all of it across dashboards.
 
 ---
 
